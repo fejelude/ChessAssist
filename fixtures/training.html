@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Chess Assist · Practice fixture</title>
+    <link rel="stylesheet" href="training.css" />
+  </head>
+  <body>
+    <main>
+      <span class="eyebrow">LOCAL TRAINING LAB</span>
+      <h1>A board for every renderer.</h1>
+      <p>
+        Use these controlled positions to verify detection and synchronization.
+        All moves here are practice.
+      </p>
+      <div class="controls">
+        <label
+          >Renderer
+          <select id="renderer">
+            <option>HTML</option>
+            <option>Shadow DOM</option>
+            <option>SVG</option>
+            <option>Canvas</option>
+            <option>Image</option>
+            <option>WebGL</option>
+          </select></label
+        ><label
+          ><input type="checkbox" id="metadata" checked /> Expose full
+          FEN</label
+        ><label><input type="checkbox" id="flip" /> Black at bottom</label
+        ><button id="next">Next independent move</button
+        ><button id="reset">Reset</button>
+      </div>
+      <div id="mount"></div>
+      <p id="info"></p>
+      <pre id="fen"></pre>
+      <p>
+        Test sequence: 1. a3 e5 2. f3 Bc5 3. g4 Qh4# — independent moves,
+        mistakes, and a forced mate.
+      </p>
+    </main>
+    <script type="module" src="training.js"></script>
+  </body>
+</html>

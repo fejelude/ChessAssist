@@ -1,0 +1,29 @@
+{
+  "manifest_version": 3,
+  "name": "Chess Assist",
+  "version": "1.2.0",
+  "description": "Local Stockfish analysis, board recognition, and independent exploration for authorized chess training.",
+  "minimum_chrome_version": "116",
+  "permissions": ["activeTab", "scripting", "storage", "sidePanel"],
+  "action": {
+    "default_title": "Open Chess Assist",
+    "default_icon": {
+      "32": "icons/icon32.png",
+      "128": "icons/icon128.png"
+    }
+  },
+  "icons": {
+    "32": "icons/icon32.png",
+    "128": "icons/icon128.png"
+  },
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  },
+  "side_panel": {
+    "default_path": "index.html"
+  },
+  "content_security_policy": {
+    "extension_pages": "script-src 'self' 'wasm-unsafe-eval'; object-src 'self'; worker-src 'self'; connect-src 'self'; img-src 'self' data: blob:; style-src 'self' 'unsafe-inline';"
+  }
+}
