@@ -96,6 +96,18 @@ try {
   });
   await app.setViewportSize({ width: 420, height: 1100 });
   await app.goto(`chrome-extension://${id}/index.html`);
+  assert.equal(
+    await app
+      .getByRole("link", { name: "fejelude", exact: true })
+      .getAttribute("href"),
+    "https://github.com/fejelude",
+  );
+  assert.ok(
+    (await app.locator(".creator-credit").innerText()).includes(
+      "This system was created and designed by fejelude",
+    ),
+  );
+
   const click = async (name) =>
     app.getByRole("button", { name, exact: true }).click();
   const move = async (from, to) => {
@@ -207,12 +219,14 @@ try {
       files: ["content.js"],
     });
   }, tabId);
-  await app.evaluate(() => {
-    document.querySelector('[aria-label="Open menu"]').click();
-    [...document.querySelectorAll("button")]
-      .find((b) => b.textContent === "Reconnect to webpage")
-      .click();
-  });
+  // Wait for React to render the menu before clicking its reconnect action.
+  // DOM clicks preserve the active source tab for activeTab/capture checks.
+  await app
+    .getByRole("button", { name: "Open menu", exact: true })
+    .evaluate((button) => button.click());
+  await app
+    .getByRole("button", { name: "Reconnect to webpage", exact: true })
+    .evaluate((button) => button.click());
   await app.waitForFunction(
     () => Boolean(document.querySelector(".move-arrow")),
     {},

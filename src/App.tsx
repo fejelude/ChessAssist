@@ -637,7 +637,17 @@ export default function App() {
         </button>
       )}
       <footer className="simple-footer">
-        Automatic analysis · Moves stay under your control
+        <p>Automatic analysis · Moves stay under your control</p>
+        <p className="creator-credit">
+          This system was created and designed by{" "}
+          <a
+            href="https://github.com/fejelude"
+            target="_blank"
+            rel="noopener noreferrer"
+          >
+            fejelude
+          </a>
+        </p>
       </footer>
       {menu && (
         <div className="modal-backdrop">

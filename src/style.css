@@ -1272,6 +1272,33 @@ hr {
   line-height: 1.5;
   margin-top: 24px;
 }
+.simple-footer {
+  border-top: 1px solid #2f3c31;
+  padding-top: 16px;
+}
+.simple-footer p {
+  margin: 0;
+}
+.simple-footer .creator-credit {
+  margin-top: 8px;
+  font-size: 10px;
+  line-height: 1.7;
+  color: var(--muted);
+}
+.creator-credit a {
+  color: var(--accent);
+  font-weight: 600;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.creator-credit a:hover {
+  color: #d5e9c5;
+}
+.creator-credit a:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
+  border-radius: 2px;
+}
 .menu-actions {
   display: grid;
   grid-template-columns: 1fr 1fr;

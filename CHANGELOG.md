@@ -6,6 +6,7 @@
 - Add visual-worker timeouts, screenshot-region checks, capture navigation checks, and shared controller binding cleanup.
 - Preserve explicit FEN rights/clocks, correction metadata/calibration, manual Edit cancellation, and recover from corrupt settings and non-finite UCI settings.
 - Update vulnerable development tooling to Vitest 5.0.5 and Sharp 0.35.5; keep deterministic engine asset permissions.
+- Add a matching creator-credit footer linking to fejelude’s GitHub profile and clean up README wording.
 - Add regression tests and a GitHub Actions validation workflow; expand real-browser reload/navigation/selection scenarios.
 - Rebuild the checked-in Manifest V3 extension and derive the package filename from its version.
 

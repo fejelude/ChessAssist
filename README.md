@@ -97,4 +97,8 @@ See **TESTING.md** for actual results and current browser verification limits. A
 
 For renderer checks after `npm ci`, run `python3 -m http.server 8080` and open `http://localhost:8080/fixtures/training.html`. The fixture switches between HTML, open Shadow DOM, SVG, canvas, image and WebGL. Disable **Expose full FEN** to exercise recognition rather than metadata extraction.
 
-The code is GPL-3.0-or-later. Preserve **LICENSE**, **THIRD_PARTY_NOTICES.md**, the engine source archive and the exact embedded Lite network in `vendor/` when redistributing. The included engine binaries are unchanged; package checksums are regenerated. thnks for reading hehi
+The code is GPL-3.0-or-later. Preserve **LICENSE**, **THIRD_PARTY_NOTICES.md**, the engine source archive and the exact embedded Lite network in `vendor/` when redistributing. The included engine binaries are unchanged; package checksums are regenerated.
+
+---
+
+This system was created and designed by [fejelude](https://github.com/fejelude).
