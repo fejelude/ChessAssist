@@ -1,5 +1,6 @@
 # 1.2.1 — stability review (unreleased)
 
+- Accept background relay requests from the extension’s own tab pages while retaining content-script restrictions.
 - Fix unchanged-board reconnects, early navigation invalidation, stale source callbacks, and cross-window activation handling.
 - Read board-host shadow roots, observe dynamic open Shadow DOM, honor manual regions, validate FEN candidates, and detect overlapping pieces and competing vertical boards.
 - Bound mutation scheduling, deduplicate readable positions while retaining canvas polling, and clean up selector/input/observer/timer work on stop.

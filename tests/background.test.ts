@@ -8,6 +8,7 @@ beforeEach(async () => {
     action: { onClicked: { addListener: vi.fn() } },
     sidePanel: { open: vi.fn().mockResolvedValue(undefined) },
     runtime: {
+      getURL: (path: string) => `chrome-extension://qa/${path}`,
       onConnect: {
         addListener: (fn: any) => {
           connect = fn;
@@ -21,13 +22,11 @@ beforeEach(async () => {
     },
     scripting: { executeScript: vi.fn().mockResolvedValue([]) },
     tabs: {
-      get: vi
-        .fn()
-        .mockResolvedValue({
-          id: 1,
-          windowId: 10,
-          url: "https://practice.test/board",
-        }),
+      get: vi.fn().mockResolvedValue({
+        id: 1,
+        windowId: 10,
+        url: "https://practice.test/board",
+      }),
       query: vi
         .fn()
         .mockResolvedValue([
@@ -43,9 +42,9 @@ beforeEach(async () => {
   await import("../src/extension/background");
 });
 afterEach(() => vi.unstubAllGlobals());
-async function request(type: string) {
+async function request(type: string, sender = {}) {
   const respond = vi.fn();
-  expect(receive({ type, tabId: 1 }, {}, respond)).toBe(true);
+  expect(receive({ type, tabId: 1 }, sender, respond)).toBe(true);
   await vi.waitFor(() => expect(respond).toHaveBeenCalledOnce());
   return respond.mock.calls[0][0];
 }
@@ -53,6 +52,13 @@ it("ignores malformed and content-originated privileged requests", () => {
   expect(receive(null, {}, vi.fn())).toBeUndefined();
   expect(
     receive({ type: "CA_CAPTURE", tabId: 1 }, { tab: { id: 1 } }, vi.fn()),
+  ).toBeUndefined();
+  expect(
+    receive(
+      { type: "CA_CAPTURE", tabId: 1 },
+      { tab: { id: 1 }, url: "https://practice.test/" },
+      vi.fn(),
+    ),
   ).toBeUndefined();
   expect(api.tabs.get).not.toHaveBeenCalled();
 });
@@ -109,4 +115,12 @@ it("keeps monitoring until the last panel bound to the tab disconnects", () => {
   expect(api.tabs.sendMessage).not.toHaveBeenCalled();
   second();
   expect(api.tabs.sendMessage).toHaveBeenCalledWith(1, { type: "CA_STOP" });
+});
+
+it("allows privileged requests from its own extension page opened in a tab", async () => {
+  const response = await request("CA_CAPTURE", {
+    tab: { id: 2 },
+    url: "chrome-extension://qa/index.html",
+  });
+  expect(response).toEqual({ ok: true, url: "data:image/png;base64,local" });
 });

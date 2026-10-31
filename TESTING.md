@@ -1,6 +1,6 @@
 # Chess Assist 1.2.1 — repository review and validation
 
-Review date: October 31, 2026. Base commit: `18c75632ede128f974670978eb0bb55fc3f0c5ee`.
+Review dates: October 31–November 1, 2026. Base commit: `18c75632ede128f974670978eb0bb55fc3f0c5ee`.
 
 ## Scope and confirmed problems
 
@@ -24,13 +24,15 @@ The review covered the background/service-worker relay, content script and lifec
 
 ## Development dependency audit
 
-The initial `npm audit` found four affected development packages: Vitest, @vitest/mocker, tinypool and Sharp (including high/critical advisories). Vitest is updated to 5.0.5 and Sharp to 0.35.5 with a regenerated lockfile. Runtime dependency versions are unchanged. The final `npm audit --json` reports **zero vulnerabilities**, and all 97 tests pass under Vitest 5.0.5.
+The initial `npm audit` found four affected development packages: Vitest, @vitest/mocker, tinypool and Sharp (including high/critical advisories). Vitest is updated to 5.0.5 and Sharp to 0.35.5 with a regenerated lockfile. Runtime dependency versions are unchanged. The final `npm audit --json` reports **zero vulnerabilities**, and all 98 tests pass under Vitest 5.0.5.
+
+The browser CI run also reproduced a relay bug: requests from this extension’s own page in a Chrome tab were rejected as content-script requests. The sender check now accepts the extension’s own origin while continuing to block webpage content scripts. A regression test failed before this fix and passes afterward.
 
 ## Local checks
 
 - Original baseline: **62 tests passed**, production build passed.
 - Eight added regression cases were run against the original source and failed before their fixes.
-- Updated suite: **97 tests passed** across 10 files, including the real React-to-packaged-Stockfish WASM integration test. The build, engine smoke check, vision smoke check and package/checksum verification also passed.
+- Updated suite: **98 tests passed** across 10 files, including the real React-to-packaged-Stockfish WASM integration test. The build, engine smoke check, vision smoke check and package/checksum verification also passed.
 - `npm run build`: TypeScript checks and production Vite/esbuild output.
 - `npm run test:engine`: real WASM MultiPV, legal root moves, mate in one, cancellation and rapid position replacement.
 - `npm run test:vision`: raster board location; 29/32 default-template piece labels with no confidently wrong identities; 32/32 piece labels and 32 empty cells with confirmed templates.

@@ -45,7 +45,7 @@ chrome.runtime.onMessage.addListener((message, sender, respond) => {
   if (
     !message ||
     typeof message !== "object" ||
-    sender.tab ||
+    (sender.tab && !sender.url?.startsWith(chrome.runtime.getURL(""))) ||
     !["CA_SCAN", "CA_SELECT", "CA_CAPTURE", "CA_MONITOR", "CA_STOP"].includes(
       message.type,
     )
