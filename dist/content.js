@@ -1,6 +1,6 @@
 "use strict";
 (() => {
-  // ../../chess-assist/node_modules/chess.js/dist/esm/chess.js
+  // node_modules/chess.js/dist/esm/chess.js
   function rootNode(comment) {
     return comment !== null ? { comment, variations: [] } : { variations: [] };
   }
@@ -3479,6 +3479,61 @@
       return row + (empty || "");
     }).join("/");
   }
+  function fenToMap(fen) {
+    const chess = new Chess(fen), map = {};
+    for (const row of chess.board())
+      for (const p of row) if (p) map[p.square] = `${p.color}${p.type}`;
+    return map;
+  }
+  function validatePosition(fen) {
+    fen = fen.trim().replace(/\s+/g, " ");
+    const v = validateFen(fen);
+    if (!v.ok) return v.error;
+    const fields = fen.split(" ");
+    if (!/^\d+$/.test(fields[4]) || !/^[1-9]\d*$/.test(fields[5]) || !Number.isSafeInteger(Number(fields[4])) || !Number.isSafeInteger(Number(fields[5])))
+      return "FEN move counters must be non-negative integers (fullmove starts at 1).";
+    if (fields[2] !== "-" && (!/^[KQkq]+$/.test(fields[2]) || new Set(fields[2]).size !== fields[2].length))
+      return "Castling rights must list each available right once, or use '-'.";
+    try {
+      const chess = new Chess(fen), map = fenToMap(fen);
+      const pieces = Object.values(map);
+      if (pieces.length > 32) return "More than 32 pieces were recognized.";
+      for (const color of ["w", "b"]) {
+        if (pieces.filter((p) => p[0] === color).length > 16)
+          return "A side has more than 16 pieces.";
+        if (pieces.filter((p) => p === `${color}p`).length > 8)
+          return "A side has more than eight pawns.";
+      }
+      const wk = Object.keys(map).find((s) => map[s] === "wk");
+      const bk = Object.keys(map).find((s) => map[s] === "bk");
+      if (Math.abs(wk.charCodeAt(0) - bk.charCodeAt(0)) <= 1 && Math.abs(+wk[1] - +bk[1]) <= 1)
+        return "The kings cannot be adjacent.";
+      const other = chess.turn() === "w" ? "b" : "w";
+      const otherKing = other === "w" ? wk : bk;
+      if (chess.isAttacked(otherKing, chess.turn()))
+        return "The side that just moved has left its king in check. Check the turn or piece recognition.";
+      const rights = fen.split(" ")[2];
+      const expected = {
+        K: ["e1", "wk", "h1", "wr"],
+        Q: ["e1", "wk", "a1", "wr"],
+        k: ["e8", "bk", "h8", "br"],
+        q: ["e8", "bk", "a8", "br"]
+      };
+      for (const r of rights === "-" ? [] : rights) {
+        const [k, kc, rook, rc] = expected[r];
+        if (map[k] !== kc || map[rook] !== rc)
+          return `Castling right ${r} conflicts with the king or rook position.`;
+      }
+      const ep = fen.split(" ")[3];
+      if (ep !== "-") {
+        const rank2 = +ep[1], pawnSquare = `${ep[0]}${rank2 + (chess.turn() === "w" ? -1 : 1)}`;
+        if (map[ep] || map[pawnSquare] !== `${other}p`)
+          return "The en passant target does not match a just-advanced pawn.";
+      }
+    } catch (e) {
+      return e.message;
+    }
+  }
 
   // src/recognition/dom.ts
   var unicode = {
@@ -3536,10 +3591,18 @@
   }
   function allElements(root) {
     const output = [];
-    for (const el of Array.from(root.querySelectorAll("*")).slice(0, 16e3)) {
-      output.push(el);
-      if (el.shadowRoot) output.push(...allElements(el.shadowRoot));
-      if (output.length >= 2e4) break;
+    const scopes = [root];
+    while (scopes.length && output.length < 2e4) {
+      const scope = scopes.pop();
+      if (scope instanceof Element && scope.shadowRoot)
+        scopes.push(scope.shadowRoot);
+      const walker = document.createTreeWalker(scope, NodeFilter.SHOW_ELEMENT);
+      let node2;
+      while (output.length < 2e4 && (node2 = walker.nextNode())) {
+        const el = node2;
+        output.push(el);
+        if (el.shadowRoot) scopes.push(el.shadowRoot);
+      }
     }
     return output;
   }
@@ -3573,12 +3636,12 @@
     let roots = all.filter((el) => {
       if (manual) {
         const r = bounds(el);
-        return visible(el) && Math.abs(r.x - manual.x) < 8 && Math.abs(r.y - manual.y) < 8 && Math.abs(r.width - manual.width) < 16;
+        return visible(el) && Math.abs(r.x - manual.x) < 8 && Math.abs(r.y - manual.y) < 8 && Math.abs(r.width - manual.width) < 16 && Math.abs(r.height - manual.height) < 16;
       }
       const desc = `${el.tagName} ${el.getAttribute("class") || ""} ${el.getAttribute("id") || ""} ${el.getAttribute("role") || ""}`;
-      return (el.hasAttribute("data-fen") || el.hasAttribute("fen") || el.hasAttribute("data-board") || /board|(^|\s)grid(\s|$)/i.test(desc) || /^(CANVAS|SVG|IMG)$/.test(el.tagName)) && visible(el);
+      return (el.hasAttribute("data-fen") || el.hasAttribute("fen") || el.hasAttribute("data-board") || /board|(^|\s)grid(\s|$)/i.test(desc) || /^(canvas|svg|img)$/.test(el.localName)) && visible(el);
     });
-    for (const el of all)
+    for (const el of manual ? [] : all)
       if (el.children.length === 64 && visible(el) && !roots.includes(el))
         roots.push(el);
     const proposals = roots.map((root2) => {
@@ -3600,7 +3663,8 @@
           (p) => p.el === el || el.contains(p.el) || p.el.contains(el)
         );
       }).length;
-      const fen2 = root2.getAttribute("data-fen") || root2.getAttribute("fen") || void 0;
+      const rawFen = root2.getAttribute("data-fen") || root2.getAttribute("fen");
+      const fen2 = rawFen && !validatePosition(rawFen.trim()) ? rawFen.trim() : void 0;
       return {
         root: root2,
         rect: rect2,
@@ -3640,6 +3704,8 @@
       orientation: orient,
       castling: attr("castling"),
       ep: attr("en-passant"),
+      halfmove: /^\d+$/.test(attr("halfmove") || "") ? Number(attr("halfmove")) : void 0,
+      fullmove: /^[1-9]\d*$/.test(attr("fullmove") || "") ? Number(attr("fullmove")) : void 0,
       bounds: rect
     };
     if (fen && fen.trim().split(/\s+/).length === 6)
@@ -3664,7 +3730,7 @@
         /\b([a-h][1-8])\b/
       )?.[1];
       const sq = direct || squareAt(row, col, orient || "w");
-      if (map[sq] && map[sq] !== p.code) collisions = true;
+      if (map[sq]) collisions = true;
       map[sq] = p.code;
     }
     const count = Object.keys(map).length;
@@ -3703,20 +3769,30 @@
     scope.__chessAssist = true;
     let target, manual, observer;
     let auto = false, poll = false, lastPing = 0, lastSent = "", selecting = false;
+    let cancelSelection;
+    let selectionGeneration = 0;
+    let shadowRoots = [];
     let debounce, pollTimer;
     function send(detection) {
       const key = JSON.stringify([
         detection.fen,
         detection.placement,
         detection.bounds,
+        detection.viewport,
+        detection.method,
         detection.orientation,
         detection.turn,
         detection.castling,
         detection.ep,
+        detection.halfmove,
+        detection.fullmove,
+        detection.ambiguous,
+        detection.confidence,
         detection.playerColor,
         detection.issues
       ]);
-      if (key === lastSent && detection.placement) return;
+      if (key === lastSent && (detection.fen || detection.placement || detection.ambiguous))
+        return;
       lastSent = key;
       void chrome.runtime.sendMessage({ type: "CA_DETECTION", detection }).catch(stop);
     }
@@ -3740,23 +3816,36 @@
     }
     function schedule() {
       if (!auto || document.hidden || selecting) return;
-      clearTimeout(debounce);
-      debounce = setTimeout(() => scan(), 450);
+      if (debounce !== void 0) return;
+      debounce = setTimeout(() => {
+        debounce = void 0;
+        if (auto && !document.hidden && !selecting) scan();
+      }, 450);
     }
     function stop() {
       auto = false;
       poll = false;
+      ++selectionGeneration;
+      cancelSelection?.();
+      setInputListeners(false);
       observer?.disconnect();
       observer = void 0;
       clearInterval(pollTimer);
       clearTimeout(debounce);
+      debounce = void 0;
+      lastSent = "";
+      shadowRoots = [];
+    }
+    function currentShadows() {
+      if (!target) return [];
+      return [target, ...allElements(target)].map((el) => el.shadowRoot).filter((root) => Boolean(root));
     }
     function watch() {
       observer?.disconnect();
       observer = void 0;
       if (!auto) return;
       observer = new MutationObserver(schedule);
-      observer.observe(target || document.body, {
+      const options = {
         subtree: true,
         childList: true,
         attributes: true,
@@ -3773,16 +3862,37 @@
           "data-orientation",
           "data-castling",
           "data-en-passant",
+          "data-halfmove",
+          "data-fullmove",
+          "data-player-color",
+          "orientation",
+          "alt",
+          "title",
           "src",
           "href",
           "aria-label"
         ]
-      });
+      };
+      observer.observe(target || document.documentElement, options);
+      shadowRoots = currentShadows();
+      for (const root of shadowRoots) observer.observe(root, options);
+      let ancestor = target || null;
+      while (ancestor) {
+        ancestor = ancestor.parentNode || (ancestor instanceof ShadowRoot ? ancestor.host : null);
+        if (ancestor)
+          observer.observe(ancestor, {
+            childList: true,
+            attributes: true,
+            attributeFilter: ["class", "style", "hidden"]
+          });
+      }
     }
     function monitor(visualPolling) {
-      auto = true;
       poll = visualPolling;
       lastPing = Date.now();
+      if (auto) return;
+      auto = true;
+      setInputListeners(true);
       watch();
       clearInterval(pollTimer);
       pollTimer = setInterval(() => {
@@ -3792,7 +3902,7 @@
         }
         if (document.hidden || selecting) return;
         if (poll) scan();
-        else if (target && !target.isConnected) {
+        else if (!target || !target.isConnected || currentShadows().some((root) => !shadowRoots.includes(root))) {
           lastSent = "";
           scan();
         }
@@ -3801,6 +3911,9 @@
     function selectRegion() {
       if (selecting) return;
       selecting = true;
+      clearTimeout(debounce);
+      debounce = void 0;
+      const generation = ++selectionGeneration;
       const overlay = document.createElement("div");
       overlay.id = "chess-assist-region-selector";
       Object.assign(overlay.style, {
@@ -3839,12 +3952,15 @@
         overlay.remove();
         document.removeEventListener("keydown", escape, true);
         selecting = false;
+        cancelSelection = void 0;
       };
+      cancelSelection = cleanup;
       const escape = (e) => {
         if (e.key === "Escape") {
           e.preventDefault();
           e.stopPropagation();
           cleanup();
+          void chrome.runtime.sendMessage({ type: "CA_SELECTION_CANCELLED" }).catch(stop);
         }
       };
       document.addEventListener("keydown", escape, true);
@@ -3852,6 +3968,7 @@
         e.preventDefault();
         e.stopPropagation();
         overlay.setPointerCapture(e.pointerId);
+        region = void 0;
         start = { x: e.clientX, y: e.clientY };
       });
       overlay.addEventListener("pointermove", (e) => {
@@ -3883,14 +4000,14 @@
         if (!chosen || chosen.width < 100) return;
         manual = chosen;
         lastSent = "";
-        requestAnimationFrame(() => requestAnimationFrame(() => scan()));
+        requestAnimationFrame(
+          () => requestAnimationFrame(() => {
+            if (generation === selectionGeneration) scan();
+          })
+        );
       });
     }
-    for (const event of ["pointerup", "keyup", "touchend"])
-      document.addEventListener(event, schedule, {
-        passive: true,
-        capture: true
-      });
+    const inputEvents = ["pointerup", "keyup", "touchend"];
     const geometryChanged = () => {
       if (manual) {
         manual = void 0;
@@ -3898,17 +4015,41 @@
       }
       schedule();
     };
-    window.addEventListener("resize", geometryChanged, { passive: true });
-    window.addEventListener("scroll", geometryChanged, {
-      passive: true,
-      capture: true
-    });
+    const visibleAgain = () => {
+      if (!document.hidden) schedule();
+    };
+    function setInputListeners(enabled) {
+      for (const event of inputEvents) {
+        if (enabled)
+          document.addEventListener(event, schedule, {
+            passive: true,
+            capture: true
+          });
+        else document.removeEventListener(event, schedule, true);
+      }
+      if (enabled) {
+        window.addEventListener("resize", geometryChanged, { passive: true });
+        window.addEventListener("scroll", geometryChanged, {
+          passive: true,
+          capture: true
+        });
+        document.addEventListener("visibilitychange", visibleAgain);
+        window.addEventListener("pagehide", stop);
+      } else {
+        window.removeEventListener("resize", geometryChanged);
+        window.removeEventListener("scroll", geometryChanged, true);
+        document.removeEventListener("visibilitychange", visibleAgain);
+        window.removeEventListener("pagehide", stop);
+      }
+    }
     chrome.runtime.onMessage.addListener((message, _sender, respond) => {
+      if (!message || typeof message !== "object") return;
       if (message.type === "CA_HELLO") {
         respond({ ready: true });
         return;
       }
       if (message.type === "CA_SCAN") {
+        manual = void 0;
         lastSent = "";
         respond({ detection: scan(false) });
         return;

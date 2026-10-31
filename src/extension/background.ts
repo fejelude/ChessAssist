@@ -11,29 +11,41 @@ async function inject(tabId: number) {
 chrome.action.onClicked.addListener((tab) => {
   if (!tab.id) return;
   // open() must run directly within the toolbar gesture.
-  void chrome.sidePanel.open({ windowId: tab.windowId });
+  void chrome.sidePanel.open({ windowId: tab.windowId }).catch(() => {});
   void inject(tab.id).catch(() => {});
 });
+// A tab can have more than one extension controller (for example a side panel
+// and an extension tab). Closing one must not stop the other's source monitor.
+const bindings = new Map<number, Set<chrome.runtime.Port>>();
 chrome.runtime.onConnect.addListener((port) => {
   if (port.name !== "chess-assist-panel") return;
   let tabId: number | undefined;
-  port.onMessage.addListener((m) => {
-    if (m.type === "BIND" && Number.isInteger(m.tabId)) {
-      if (tabId && tabId !== m.tabId)
-        void chrome.tabs
-          .sendMessage(tabId, { type: "CA_STOP" })
-          .catch(() => {});
-      tabId = m.tabId;
-    }
-  });
-  port.onDisconnect.addListener(() => {
-    if (tabId)
+  const release = () => {
+    if (tabId === undefined) return;
+    const ports = bindings.get(tabId);
+    ports?.delete(port);
+    if (ports && !ports.size) {
+      bindings.delete(tabId);
       void chrome.tabs.sendMessage(tabId, { type: "CA_STOP" }).catch(() => {});
+    }
+    tabId = undefined;
+  };
+  port.onMessage.addListener((m) => {
+    if (m?.type !== "BIND" || !Number.isInteger(m.tabId) || m.tabId === tabId)
+      return;
+    release();
+    tabId = m.tabId;
+    const ports = bindings.get(m.tabId) || new Set<chrome.runtime.Port>();
+    ports.add(port);
+    bindings.set(m.tabId, ports);
   });
+  port.onDisconnect.addListener(release);
 });
 chrome.runtime.onMessage.addListener((message, sender, respond) => {
   if (
-    sender.tab ||
+    !message ||
+    typeof message !== "object" ||
+    (sender.tab && !sender.url?.startsWith(chrome.runtime.getURL(""))) ||
     !["CA_SCAN", "CA_SELECT", "CA_CAPTURE", "CA_MONITOR", "CA_STOP"].includes(
       message.type,
     )
@@ -72,7 +84,11 @@ chrome.runtime.onMessage.addListener((message, sender, respond) => {
           active: true,
           windowId: tab.windowId,
         });
-        if (current?.id !== tabId)
+        if (
+          current?.id !== tabId ||
+          current.url !== tab.url ||
+          current.status === "loading"
+        )
           throw new Error(
             "The active tab changed. Refresh the source position.",
           );
@@ -91,3 +107,5 @@ chrome.runtime.onMessage.addListener((message, sender, respond) => {
   })();
   return true;
 });
+
+export {};

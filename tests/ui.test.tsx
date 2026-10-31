@@ -464,3 +464,58 @@ it("enters castling, en passant and underpromotion through the same manual Play 
   ).toBeDefined();
   expect(document.querySelector(".move-arrow")).toBeNull();
 });
+
+it("recovers from malformed saved settings and still starts manual analysis", async () => {
+  localStorage.setItem("simpleSettings", "{bad json");
+  await open();
+  expect(document.querySelector(".move-arrow")).not.toBeNull();
+});
+it("rejects unsupported stored thinking time and polling values", async () => {
+  localStorage.setItem(
+    "simpleSettings",
+    JSON.stringify({ budget: "garbage", polling: "false" }),
+  );
+  await open();
+  click("Open menu");
+  expect(
+    (screen.getByLabelText("Thinking time") as HTMLSelectElement).value,
+  ).toBe("1800");
+  expect((screen.getByRole("checkbox") as HTMLInputElement).checked).toBe(
+    false,
+  );
+});
+it("returns to a usable committed board when cancelling Edit during connection", async () => {
+  await open();
+  source().start = () => {}; // The source has not answered yet.
+  click("Select Board on Webpage");
+  expect(document.querySelector(".move-arrow")).toBeNull();
+  click("Edit");
+  click("Cancel edits");
+  await waitFor(() =>
+    expect(document.querySelector(".move-arrow")).not.toBeNull(),
+  );
+  expect(screen.getByText(/Manual board ·/)).toBeDefined();
+});
+
+it("initializes correction metadata from a complete FEN without separate hints", async () => {
+  const { PositionEditor } = await import("../src/ui/PositionEditor");
+  const confirm = vi.fn();
+  const fen = "4k3/8/8/8/8/8/8/4K2R b - - 0 1";
+  render(
+    <PositionEditor
+      detection={{
+        fen,
+        method: "fen",
+        confidence: 1,
+        issues: [],
+        viewport: { width: 800, height: 800 },
+        url: "",
+        timestamp: 1,
+      }}
+      onConfirm={confirm}
+      onClose={() => {}}
+    />,
+  );
+  click("Save and continue");
+  expect(confirm).toHaveBeenCalledWith(fen, "w", []);
+});

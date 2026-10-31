@@ -1,6 +1,11 @@
 import { Chess } from "chess.js";
 import { validatePosition } from "../chess/position";
-import type { Candidate, SearchResult, Settings } from "../types";
+import {
+  defaults,
+  type Candidate,
+  type SearchResult,
+  type Settings,
+} from "../types";
 export function parseInfo(line: string): Candidate | undefined {
   if (!line.startsWith("info ") || !line.includes(" pv ")) return;
   const value = (key: string) =>
@@ -150,6 +155,22 @@ export class Engine {
   async analyze(fen: string, settings: Settings): Promise<number> {
     const invalid = validatePosition(fen);
     if (invalid) throw new Error(`Check the position: ${invalid}`);
+    const bounded = (
+      value: number,
+      min: number,
+      max: number,
+      fallback: number,
+    ) =>
+      Number.isFinite(value)
+        ? Math.max(min, Math.min(max, Math.round(value)))
+        : fallback;
+    settings = {
+      ...settings,
+      hash: bounded(settings.hash, 8, 128, defaults.hash),
+      multiPV: bounded(settings.multiPV, 1, 3, defaults.multiPV),
+      depth: bounded(settings.depth, 1, 60, defaults.depth),
+      time: bounded(settings.time, 100, 120000, defaults.time),
+    };
     const id = ++this.serial,
       request = { id, fen, settings: { ...settings }, attempt: 0 };
     this.pending = request;

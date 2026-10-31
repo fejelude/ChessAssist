@@ -53,3 +53,40 @@ describe("visual detection", () => {
     expect(r.cells[1].empty).toBe(true);
   });
 });
+
+it("rejects equally plausible boards stacked vertically", () => {
+  const width = 400,
+    height = 800,
+    data = new Uint8ClampedArray(width * height * 4);
+  for (let y = 0; y < height; y++)
+    for (let x = 0; x < width; x++) {
+      const inside =
+        x >= 40 && x < 360 && ((y >= 20 && y < 340) || (y >= 440 && y < 760));
+      const localY = y >= 440 ? y - 440 : y - 20;
+      const light =
+        (Math.floor((x - 40) / 40) + Math.floor(localY / 40)) % 2 === 0;
+      data.set(
+        [
+          ...(inside
+            ? light
+              ? [225, 220, 205]
+              : [115, 142, 119]
+            : [18, 24, 21]),
+          255,
+        ],
+        (y * width + x) * 4,
+      );
+    }
+  expect(locateBoard({ width, height, data })).toBeUndefined();
+});
+
+it("rejects stale or invalid screenshot crop bounds", () => {
+  const im = image();
+  for (const b of [
+    { x: -20, y: 40, width: 320, height: 320 },
+    { x: 64, y: 200, width: 320, height: 320 },
+    { x: NaN, y: 40, width: 320, height: 320 },
+  ]) {
+    expect(() => recognize(im, b, [])).toThrow(/outside the screenshot/);
+  }
+});

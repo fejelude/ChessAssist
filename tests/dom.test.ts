@@ -93,3 +93,39 @@ describe("generic DOM recognition", () => {
     expect(detectDocument().detection?.ambiguous).toBe(true);
   });
 });
+
+it("keeps manual selection inside the chosen region even beside an unlabeled grid", () => {
+  const root = board();
+  // This board also qualifies for the generic 64-child strategy.
+  while (root.children.length < 64) root.append(document.createElement("span"));
+  expect(
+    detectDocument({ x: 530, y: 20, width: 160, height: 160 }).target,
+  ).toBeUndefined();
+});
+it("reads pieces hosted directly in a board's open shadow root", () => {
+  const root = board();
+  root.attachShadow({ mode: "open" }).append(...Array.from(root.children));
+  expect(detectDocument().detection?.placement).toBe(START_FEN.split(" ")[0]);
+});
+it("does not let malformed FEN metadata outrank a real board", () => {
+  board();
+  const decoy = document.createElement("div");
+  decoy.setAttribute("data-fen", "this is not a valid fen");
+  decoy.getBoundingClientRect = () => rect(530, 20, 160);
+  document.body.append(decoy);
+  expect(detectDocument().detection?.placement).toBe(START_FEN.split(" ")[0]);
+});
+it("treats duplicate same-color pieces on one square as an animation collision", () => {
+  const root = board(),
+    first = root.firstElementChild!;
+  const clone = first.cloneNode(true) as Element;
+  clone.getBoundingClientRect = first.getBoundingClientRect;
+  root.append(clone);
+  expect(detectDocument().detection?.ambiguous).toBe(true);
+});
+it("recognizes an unlabeled SVG as a visual candidate", () => {
+  const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+  svg.getBoundingClientRect = () => rect(20, 20, 480);
+  document.body.append(svg);
+  expect(detectDocument().target).toBe(svg);
+});

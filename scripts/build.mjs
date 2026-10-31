@@ -1,6 +1,6 @@
 import { build } from "vite";
 import { build as bundle } from "esbuild";
-import { copyFileSync, mkdirSync, cpSync } from "node:fs";
+import { copyFileSync, mkdirSync, cpSync, chmodSync } from "node:fs";
 await build();
 await bundle({
   entryPoints: ["src/extension/background.ts"],
@@ -27,6 +27,8 @@ for (const ext of ["js", "wasm"]) {
     `node_modules/stockfish/bin/${name}`,
     `dist/engine/stockfish.${ext}`,
   );
+  // npm may mark WASM executable; keep deterministic asset permissions.
+  chmodSync(`dist/engine/stockfish.${ext}`, 0o644);
 }
 copyFileSync("node_modules/stockfish/Copying.txt", "dist/engine/COPYING.txt");
 cpSync("licenses", "dist/licenses", { recursive: true });

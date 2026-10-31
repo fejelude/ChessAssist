@@ -115,9 +115,14 @@ export function locateBoard(im: Pixels): Bounds | undefined {
   }
   found.sort((a, b) => b.score - a.score || b.b.width - a.b.width);
   if (
-    found[1] &&
-    found[1].score >= found[0].score - 0.02 &&
-    Math.abs(found[1].b.x - found[0].b.x) > found[0].b.width * 0.5
+    found
+      .slice(1)
+      .some(
+        (f) =>
+          f.score >= found[0].score - 0.02 &&
+          (Math.abs(f.b.x - found[0].b.x) > found[0].b.width * 0.5 ||
+            Math.abs(f.b.y - found[0].b.y) > found[0].b.height * 0.5),
+      )
   )
     return;
   return found[0]?.b;
@@ -206,6 +211,18 @@ export function recognize(
   b: Bounds,
   templates: Template[],
 ): RecognitionResult {
+  if (
+    ![b.x, b.y, b.width, b.height].every(Number.isFinite) ||
+    b.width < 8 ||
+    b.height < 8 ||
+    b.x < -2 ||
+    b.y < -2 ||
+    b.x + b.width > im.width + 2 ||
+    b.y + b.height > im.height + 2
+  )
+    throw new Error(
+      "The board region is outside the screenshot. Select the board again.",
+    );
   const cells: VisualCell[] = [];
   for (let row = 0; row < 8; row++)
     for (let col = 0; col < 8; col++) {

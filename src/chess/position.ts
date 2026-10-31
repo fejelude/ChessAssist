@@ -65,8 +65,23 @@ export function placementToMap(placement: string): PieceMap {
   return map;
 }
 export function validatePosition(fen: string): string | undefined {
+  fen = fen.trim().replace(/\s+/g, " ");
   const v = validateFen(fen);
   if (!v.ok) return v.error;
+  const fields = fen.split(" ");
+  if (
+    !/^\d+$/.test(fields[4]) ||
+    !/^[1-9]\d*$/.test(fields[5]) ||
+    !Number.isSafeInteger(Number(fields[4])) ||
+    !Number.isSafeInteger(Number(fields[5]))
+  )
+    return "FEN move counters must be non-negative integers (fullmove starts at 1).";
+  if (
+    fields[2] !== "-" &&
+    (!/^[KQkq]+$/.test(fields[2]) ||
+      new Set(fields[2]).size !== fields[2].length)
+  )
+    return "Castling rights must list each available right once, or use '-'.";
   try {
     const chess = new Chess(fen),
       map = fenToMap(fen);
@@ -143,9 +158,21 @@ export function reconcile(
     };
   if (previousFen) {
     const chess = new Chess(previousFen);
+    const matchesMetadata = (fen: string) => {
+      const parts = fen.split(" ");
+      return (
+        (!detection.turn || detection.turn === parts[1]) &&
+        (detection.castling === undefined || detection.castling === parts[2]) &&
+        (detection.ep === undefined || detection.ep === parts[3]) &&
+        (detection.halfmove === undefined ||
+          detection.halfmove === Number(parts[4])) &&
+        (detection.fullmove === undefined ||
+          detection.fullmove === Number(parts[5]))
+      );
+    };
     if (
       chess.fen().split(" ")[0] === detection.placement &&
-      (!detection.turn || detection.turn === chess.turn())
+      matchesMetadata(chess.fen())
     )
       return { fen: previousFen, issues: [] };
     const matches: { fen: string; move: string }[] = [];
@@ -153,7 +180,7 @@ export function reconcile(
       chess.move(move);
       if (
         chess.fen().split(" ")[0] === detection.placement &&
-        (!detection.turn || detection.turn === chess.turn())
+        matchesMetadata(chess.fen())
       )
         matches.push({ fen: chess.fen(), move: move.san });
       chess.undo();
