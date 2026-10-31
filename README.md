@@ -1,6 +1,6 @@
 # Chess Assist
 
-A Chrome extension for local chess analysis with Stockfish WASM, a manual position editor, optional webpage board recognition, and PGN review.
+A Chrome extension for local chess analysis with Stockfish WASM, a manual position editor, optional webpage board recognition.
 
 **[Download Chess Assist 1.2.0](https://github.com/fejelude/ChessAssist/releases/download/v1.2.0/ChessAssist-1.2.0.zip)** · [All releases](https://github.com/fejelude/ChessAssist/releases)
 
@@ -93,7 +93,7 @@ Set `CHROME_PATH=/absolute/path/to/chrome` for a preinstalled Chrome for Testing
 
 The full engine build remains available through `CHESS_ASSIST_ENGINE=full npm run build` (set the equivalent environment variable first in PowerShell). It produces a substantially larger extension.
 
-See **TESTING.md** for actual results and current browser verification limits. A complete local Chrome extension pass is not claimed.
+See **TESTING.md** for actual results and current browser verification limits. A complete local Chrome extension pass is not claimed. The full Chromium suite passed in [GitHub Actions](https://github.com/fejelude/ChessAssist/actions/runs/41221401561).
 
 For renderer checks after `npm ci`, run `python3 -m http.server 8080` and open `http://localhost:8080/fixtures/training.html`. The fixture switches between HTML, open Shadow DOM, SVG, canvas, image and WebGL. Disable **Expose full FEN** to exercise recognition rather than metadata extraction.
 

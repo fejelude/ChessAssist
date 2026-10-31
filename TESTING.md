@@ -41,11 +41,19 @@ The browser CI run also reproduced a relay bug: requests from this extension’s
 
 The production manifest retains `activeTab`, `scripting`, `storage`, `sidePanel`, the existing local WASM CSP, and no permanent host permissions. Stockfish binaries, neural network, artwork and third-party licenses are retained.
 
+## Chromium CI results
+
+[GitHub Actions run 3](https://github.com/fejelude/ChessAssist/actions/runs/41221401561) passed the complete workflow for commit `d3a4b6c54972bd262bc504b0641b6e13e4ff3ae8`: production build, 98 tests, real WASM and vision smoke checks, Chromium browser suite, and packaging.
+
+The browser report records **21 successful checks and no UI/CSP errors**: packaged Stockfish under the MV3 CSP; both colors; native drag/click editing; pause/resume, correction, promotion and terminal states; source mutations; open Shadow DOM; reload and same-origin navigation; selection cancellation; all six renderer fixtures; and screenshot worker execution. The requested creator footer and direct profile URL also pass browser assertions. Separate rendered previews at 320 px and 420 px show the footer fits without horizontal overflow.
+
+The actual canvas screenshot returned 64 squares and 22 identified pieces, with correction requested for uncertain pieces. This is a successful safe fallback, not a claim of complete recognition for that screenshot. The 29/32 and 32/32 results above refer to the separate raster/template smoke check.
+
 ## Browser verification limits
 
 The Playwright Chrome for Testing download returned an empty/truncated archive on this host. A separately obtained Chromium 153 headless-shell executable launched, but the extension service worker never appeared (30-second timeout); that executable does not establish a Chrome extension pass. **No full local Chrome pass is claimed.**
 
-The expanded `npm run test:browser` suite and `.github/workflows/validate.yml` are provided for full Chromium: packaged worker under MV3 CSP, legal manual moves, native drag/drop, correction, underpromotion, terminal states, content synchronization, in-place Shadow DOM changes, same-tab reload/navigation, cancelled selection, renderer fixtures, and screenshot recognition. This suite was expanded here but could not complete locally. CI results, when available, are separate evidence.
+The expanded `npm run test:browser` suite and `.github/workflows/validate.yml` are provided for full Chromium: packaged worker under MV3 CSP, legal manual moves, native drag/drop, correction, underpromotion, terminal states, content synchronization, in-place Shadow DOM changes, same-tab reload/navigation, cancelled selection, renderer fixtures, and screenshot recognition. This suite was expanded here but could not complete locally. The successful CI run above provides real-browser evidence separately from the local runtime.
 
 The browser harness uses a temporary manifest with host access to automate controlled localhost fixtures. It does not verify production toolbar-granted `activeTab` access. A desktop smoke check is still needed for toolbar opening, granting/revoking access across origins, native side-panel close/reopen, protected pages, and file-URL opt-in. Unit/jsdom tests cannot establish these browser behaviors.
 
