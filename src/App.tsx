@@ -199,7 +199,7 @@ export default function App() {
     };
     const read = isExtension
       ? chrome.storage.local.get("simpleSettings").then((r) => r.simpleSettings)
-      : Promise.resolve(
+      : Promise.resolve().then(() =>
           JSON.parse(localStorage.getItem("simpleSettings") || "null"),
         );
     void read
@@ -210,8 +210,8 @@ export default function App() {
           state.current.color = saved.color;
           setColor(saved.color);
         }
-        if (saved?.budget) setBudget(saved.budget);
-        if (saved?.polling) setPolling(true);
+        if ([800, 1800, 5000].includes(saved?.budget)) setBudget(saved.budget);
+        if (saved?.polling === true) setPolling(true);
         setLoaded(true);
       });
     const stop = () => {
@@ -268,8 +268,13 @@ export default function App() {
   useEffect(() => {
     if (loaded) {
       const saved = { color, budget, polling };
-      if (isExtension) void chrome.storage.local.set({ simpleSettings: saved });
-      else localStorage.setItem("simpleSettings", JSON.stringify(saved));
+      void Promise.resolve()
+        .then(() => {
+          if (isExtension)
+            return chrome.storage.local.set({ simpleSettings: saved });
+          localStorage.setItem("simpleSettings", JSON.stringify(saved));
+        })
+        .catch(() => {});
     }
   }, [loaded, color, budget, polling]);
   useEffect(() => {
@@ -375,6 +380,11 @@ export default function App() {
     engine.current?.cancel();
     source.current?.stop();
     setLine(undefined);
+    if (!next) {
+      state.current.valid = true;
+      setValid(true);
+      setError("");
+    }
     dispatch({ type: next ? "edit" : "play" });
   }
   function openCorrection() {
@@ -433,11 +443,8 @@ export default function App() {
     url: "",
     timestamp: 0,
   };
-  function corrected(
-    next: string,
-    _orientation: Color,
-    _templates: Template[],
-  ) {
+  function corrected(next: string, orientation: Color, templates: Template[]) {
+    if (templates.length) source.current?.confirm(next, orientation, templates);
     source.current?.stop();
     engine.current?.cancel();
     state.current.editor = false;

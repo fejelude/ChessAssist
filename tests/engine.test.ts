@@ -191,3 +191,22 @@ describe("request watchdogs", () => {
     }
   });
 });
+
+it("uses finite integer limits when settings contain non-finite values", async () => {
+  const worker = new FakeWorker(),
+    engine = new Engine(() => worker);
+  try {
+    await engine.analyze(START_FEN, {
+      ...defaults,
+      hash: NaN,
+      multiPV: Infinity,
+      depth: NaN,
+      time: NaN,
+    });
+    expect(worker.commands).toContain("setoption name Hash value 32");
+    expect(worker.commands).toContain("setoption name MultiPV value 3");
+    expect(worker.commands).toContain("go depth 20 movetime 3000");
+  } finally {
+    engine.dispose();
+  }
+});

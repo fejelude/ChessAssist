@@ -27,6 +27,10 @@ export function resolveSource(previous: string | undefined, d: Detection) {
     d.placement === START_FEN.split(" ")[0] &&
     d.orientation &&
     !d.turn &&
+    d.castling === undefined &&
+    d.ep === undefined &&
+    d.halfmove === undefined &&
+    d.fullmove === undefined &&
     !previous
   )
     return { fen: START_FEN, issues: [] };
@@ -34,6 +38,7 @@ export function resolveSource(previous: string | undefined, d: Detection) {
 }
 export class SourceBridge {
   private tab?: number;
+  private windowId?: number;
   private origin = "";
   private url = "";
   private polling = false;
@@ -45,11 +50,13 @@ export class SourceBridge {
   private heartbeat?: ReturnType<typeof setInterval>;
   private worker?: Worker;
   private templates: Template[] = [];
+  private templateReady: Promise<void>;
   private learned: Template[] = [];
   private lastSignature = "";
   private captureTime = 0;
   private orientation?: Orientation;
   private pending?: { id: number; d: Detection; url: string };
+  private visionTimer?: ReturnType<typeof setTimeout>;
   lastFen?: string;
   lastDetection?: Detection;
   lastVisual?: RecognitionResult;
@@ -63,24 +70,59 @@ export class SourceBridge {
       !this.stopped &&
       !this.connecting &&
       sender.tab?.id === this.tab &&
-      message.type === "CA_DETECTION"
+      (sender.frameId === undefined || sender.frameId === 0)
+    ) {
+      if (message?.type === "CA_DETECTION")
+        void this.process(message.detection);
+      else if (message?.type === "CA_SELECTION_CANCELLED")
+        this.onProblem({
+          message:
+            "Board selection cancelled. You can enter the position manually.",
+        });
+    }
+  };
+  private activation = (info: { windowId: number }) => {
+    if (
+      !this.stopped &&
+      (this.windowId === undefined || info.windowId === this.windowId)
     )
-      void this.process(message.detection);
-  };
-  private activation = () => {
-    if (!this.stopped) void this.start();
-  };
-  private navigation = (id: number, change: { status?: string }) => {
-    if (!this.stopped && id === this.tab && change.status === "complete")
       void this.start();
   };
+  private navigation = (
+    id: number,
+    change: { status?: string; url?: string },
+  ) => {
+    if (this.stopped || id !== this.tab) return;
+    if (change.status === "loading" || change.url) {
+      ++this.session;
+      ++this.generation;
+      this.connecting = true;
+      clearInterval(this.heartbeat);
+      clearTimeout(this.visionTimer);
+      this.worker?.terminate();
+      this.worker = undefined;
+      this.clearSource();
+      this.onInvalidate();
+    }
+    if (change.status === "complete" || (change.url && !change.status))
+      void this.start();
+  };
+  private clearSource() {
+    this.lastFen = undefined;
+    this.orientation = undefined;
+    this.lastSignature = "";
+    this.lastDetection = undefined;
+    this.lastVisual = undefined;
+    this.lastSnapshot = undefined;
+    this.pending = undefined;
+  }
   constructor() {
     if (isExtension) {
       chrome.runtime.onMessage.addListener(this.receive);
       chrome.tabs.onActivated.addListener(this.activation);
       chrome.tabs.onUpdated.addListener(this.navigation);
     }
-    void defaultTemplates()
+    this.templateReady = defaultTemplates()
       .then((t) => {
         this.templates = t;
       })
@@ -103,6 +145,8 @@ export class SourceBridge {
     this.stop();
     this.stopped = false;
     this.connecting = true;
+    // A fresh connection must publish even if its first position is unchanged.
+    this.lastSignature = "";
     const id = ++this.session;
     if (!isExtension) {
       this.onProblem({
@@ -119,22 +163,18 @@ export class SourceBridge {
       if (id !== this.session) return;
       if (!tab?.id) throw new Error("Open a webpage with a chessboard first.");
       if (tab.id !== this.tab || tab.url !== this.url) {
-        this.lastFen = undefined;
-        this.orientation = undefined;
-        this.lastSignature = "";
-        this.lastDetection = undefined;
-        this.lastVisual = undefined;
-        this.lastSnapshot = undefined;
+        this.clearSource();
         this.onInvalidate();
       }
       this.tab = tab.id;
+      this.windowId = tab.windowId;
       this.url = tab.url || "";
       this.origin = tab.url ? new URL(tab.url).origin : "";
       const stored = (
         await chrome.storage.local.get(`templates:${this.origin}`)
       )[`templates:${this.origin}`];
-      this.learned = Array.isArray(stored) ? (stored as Template[]) : [];
       if (id !== this.session) return;
+      this.learned = Array.isArray(stored) ? (stored as Template[]) : [];
       this.port = chrome.runtime.connect({ name: "chess-assist-panel" });
       this.port.postMessage({ type: "BIND", tabId: this.tab });
       this.onStatus("Finding the board…");
@@ -143,10 +183,11 @@ export class SourceBridge {
       this.connecting = false;
       if (region) this.onStatus("Drag around the board on the webpage.");
       else await this.process(response.detection);
-      if (this.stopped) return;
+      if (this.stopped || id !== this.session) return;
       const ping = () => {
         void this.call("CA_MONITOR", { visualPolling: polling }).catch((e) => {
-          if (!this.stopped) this.onProblem({ message: e.message });
+          if (!this.stopped && id === this.session)
+            this.onProblem({ message: e.message });
         });
       };
       ping();
@@ -167,6 +208,8 @@ export class SourceBridge {
   private async process(input: Detection) {
     if (this.stopped) return;
     ++this.generation;
+    clearTimeout(this.visionTimer);
+    this.pending = undefined;
     let d = { ...input };
     if (!d.orientation && this.orientation) {
       if (d.placement && this.orientation === "b") {
@@ -186,6 +229,7 @@ export class SourceBridge {
       return;
     }
     const id = this.generation;
+    await this.templateReady;
     const delay = 850 - (Date.now() - this.captureTime);
     if (delay > 0) await new Promise((r) => setTimeout(r, delay));
     if (this.stopped || id !== this.generation) return;
@@ -208,6 +252,8 @@ export class SourceBridge {
             pending.id !== this.generation
           )
             return;
+          this.pending = undefined;
+          clearTimeout(this.visionTimer);
           if (e.data.error) {
             this.onInvalidate();
             this.lastDetection = pending.d;
@@ -237,16 +283,34 @@ export class SourceBridge {
             pending.url,
           );
         };
+        const worker = this.worker;
         this.worker.onerror = () => {
+          if (this.stopped || this.worker !== worker) return;
+          const current = this.pending?.id === this.generation;
+          this.pending = undefined;
+          clearTimeout(this.visionTimer);
+          worker.terminate();
+          this.worker = undefined;
+          if (!current) return;
           this.onInvalidate();
           this.onProblem({
             message:
               "Could not read this board image. Correct the position or reconnect.",
           });
-          this.worker?.terminate();
-          this.worker = undefined;
         };
       }
+      this.visionTimer = setTimeout(() => {
+        if (this.stopped || id !== this.generation) return;
+        this.pending = undefined;
+        this.worker?.terminate();
+        this.worker = undefined;
+        this.onInvalidate();
+        this.onProblem({
+          message:
+            "Board recognition timed out. Correct the position or reconnect.",
+          detection: d,
+        });
+      }, 12000);
       this.worker.postMessage({
         id,
         url: response.url,
@@ -256,6 +320,8 @@ export class SourceBridge {
       });
     } catch (e) {
       if (id === this.generation && !this.stopped) {
+        clearTimeout(this.visionTimer);
+        this.pending = undefined;
         this.onInvalidate();
         this.onProblem({ message: (e as Error).message });
       }
@@ -269,6 +335,8 @@ export class SourceBridge {
       d.orientation,
       d.castling,
       d.ep,
+      d.halfmove,
+      d.fullmove,
       d.ambiguous,
     ]);
     this.lastDetection = d;
@@ -322,10 +390,12 @@ export class SourceBridge {
     this.stopped = true;
     ++this.generation;
     clearInterval(this.heartbeat);
+    clearTimeout(this.visionTimer);
     this.port?.disconnect();
     this.port = undefined;
     this.worker?.terminate();
     this.worker = undefined;
+    this.pending = undefined;
   }
   dispose() {
     this.stop();

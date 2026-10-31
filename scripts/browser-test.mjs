@@ -232,6 +232,44 @@ try {
     "Actual content-script mutations synchronize the backgrounded extension controller and trigger fresh real engine analysis.",
   );
   await fixture.locator("#reset").click();
+  await fixture.locator("#renderer").selectOption("Shadow DOM");
+  await app.locator(".move-arrow").waitFor({ timeout: 20000 });
+  // Mutate inside the existing root: no fixture rerender and no user-input event.
+  await fixture.evaluate(() => {
+    window.fixture.chess.move("a3");
+    document
+      .querySelector("#mount")
+      .firstElementChild.shadowRoot.querySelector("[data-fen]")
+      .setAttribute("data-fen", window.fixture.chess.fen());
+  });
+  await app.waitForFunction(
+    () => document.querySelector(".simple-move")?.textContent === "Waiting",
+  );
+  report.checks.push(
+    "An in-place open-shadow-root mutation updates the connected position.",
+  );
+  await fixture.reload();
+  await fixture.waitForFunction(() => window.fixture);
+  await app.locator(".move-arrow").waitFor({ timeout: 20000 });
+  await fixture.goto(`${address}/fixtures/training.html?navigation=1`);
+  await fixture.waitForFunction(() => window.fixture);
+  await app.locator(".move-arrow").waitFor({ timeout: 20000 });
+  report.checks.push(
+    "Same-tab reload and same-origin navigation reconnect and restore analysis.",
+  );
+  await worker.evaluate(
+    async (tabId) => chrome.tabs.sendMessage(tabId, { type: "CA_SELECT" }),
+    tabId,
+  );
+  await fixture.locator("#chess-assist-region-selector").waitFor();
+  await fixture.keyboard.press("Escape");
+  await fixture
+    .locator("#chess-assist-region-selector")
+    .waitFor({ state: "detached" });
+  await app.getByText("Practice board", { exact: true }).waitFor();
+  report.checks.push(
+    "Escape cancels region selection and restores manual analysis.",
+  );
   const detect = () =>
     worker.evaluate(
       async (tabId) =>
@@ -288,11 +326,20 @@ try {
           const w = new Worker(chrome.runtime.getURL(workerPath), {
             type: "module",
           });
+          const timeout = setTimeout(() => {
+            w.terminate();
+            reject(new Error("Visual worker timed out"));
+          }, 12000);
           w.onmessage = (e) => {
+            clearTimeout(timeout);
             w.terminate();
             resolve(e.data);
           };
-          w.onerror = (e) => reject(new Error(e.message));
+          w.onerror = (e) => {
+            clearTimeout(timeout);
+            w.terminate();
+            reject(new Error(e.message));
+          };
           w.postMessage({
             id: 1,
             url,

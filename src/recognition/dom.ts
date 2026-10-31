@@ -5,7 +5,7 @@ import type {
   PieceMap,
   Orientation,
 } from "../types";
-import { mapToPlacement, squareAt } from "../chess/position";
+import { mapToPlacement, squareAt, validatePosition } from "../chess/position";
 import type { Square } from "chess.js";
 
 const unicode: Record<string, PieceCode> = {
@@ -76,12 +76,22 @@ function visible(el: Element) {
     getComputedStyle(el).visibility !== "hidden"
   );
 }
-function allElements(root: Document | ShadowRoot | Element): Element[] {
+export function allElements(root: Document | ShadowRoot | Element): Element[] {
   const output: Element[] = [];
-  for (const el of Array.from(root.querySelectorAll("*")).slice(0, 16000)) {
-    output.push(el);
-    if (el.shadowRoot) output.push(...allElements(el.shadowRoot));
-    if (output.length >= 20000) break;
+  // One budget across light DOM and all open shadow roots. TreeWalker avoids
+  // allocating an unbounded querySelectorAll result before applying the limit.
+  const scopes: (Document | ShadowRoot | Element)[] = [root];
+  while (scopes.length && output.length < 20000) {
+    const scope = scopes.pop()!;
+    if (scope instanceof Element && scope.shadowRoot)
+      scopes.push(scope.shadowRoot);
+    const walker = document.createTreeWalker(scope, NodeFilter.SHOW_ELEMENT);
+    let node: Node | null;
+    while (output.length < 20000 && (node = walker.nextNode())) {
+      const el = node as Element;
+      output.push(el);
+      if (el.shadowRoot) scopes.push(el.shadowRoot);
+    }
   }
   return output;
 }
@@ -132,7 +142,8 @@ export function detectDocument(manual?: Bounds): {
         visible(el) &&
         Math.abs(r.x - manual.x) < 8 &&
         Math.abs(r.y - manual.y) < 8 &&
-        Math.abs(r.width - manual.width) < 16
+        Math.abs(r.width - manual.width) < 16 &&
+        Math.abs(r.height - manual.height) < 16
       );
     }
     const desc = `${el.tagName} ${el.getAttribute("class") || ""} ${el.getAttribute("id") || ""} ${el.getAttribute("role") || ""}`;
@@ -141,12 +152,12 @@ export function detectDocument(manual?: Bounds): {
         el.hasAttribute("fen") ||
         el.hasAttribute("data-board") ||
         /board|(^|\s)grid(\s|$)/i.test(desc) ||
-        /^(CANVAS|SVG|IMG)$/.test(el.tagName)) &&
+        /^(canvas|svg|img)$/.test(el.localName)) &&
       visible(el)
     );
   });
   // Discover unlabeled HTML grids by their 64 square children.
-  for (const el of all)
+  for (const el of manual ? [] : all)
     if (el.children.length === 64 && visible(el) && !roots.includes(el))
       roots.push(el);
   const proposals = roots
@@ -194,8 +205,9 @@ export function detectDocument(manual?: Bounds): {
           )
         );
       }).length;
+      const rawFen = root.getAttribute("data-fen") || root.getAttribute("fen");
       const fen =
-        root.getAttribute("data-fen") || root.getAttribute("fen") || undefined;
+        rawFen && !validatePosition(rawFen.trim()) ? rawFen.trim() : undefined;
       return {
         root,
         rect,
@@ -253,6 +265,12 @@ export function detectDocument(manual?: Bounds): {
     orientation: orient,
     castling: attr("castling"),
     ep: attr("en-passant"),
+    halfmove: /^\d+$/.test(attr("halfmove") || "")
+      ? Number(attr("halfmove"))
+      : undefined,
+    fullmove: /^[1-9]\d*$/.test(attr("fullmove") || "")
+      ? Number(attr("fullmove"))
+      : undefined,
     bounds: rect,
   } as const;
   if (fen && fen.trim().split(/\s+/).length === 6)
@@ -281,7 +299,7 @@ export function detectDocument(manual?: Bounds): {
         /\b([a-h][1-8])\b/,
       )?.[1] as Square | undefined;
     const sq = direct || squareAt(row, col, orient || "w");
-    if (map[sq] && map[sq] !== p.code) collisions = true;
+    if (map[sq]) collisions = true;
     map[sq] = p.code;
   }
   const count = Object.keys(map).length;

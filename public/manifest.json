@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Chess Assist",
-  "version": "1.2.0",
+  "version": "1.2.1",
   "description": "Local Stockfish analysis, board recognition, and independent exploration for authorized chess training.",
   "minimum_chrome_version": "116",
   "permissions": ["activeTab", "scripting", "storage", "sidePanel"],

@@ -1,4 +1,4 @@
-import { detectDocument } from "../recognition/dom";
+import { detectDocument, allElements } from "../recognition/dom";
 import type { Bounds, Detection } from "../types";
 
 (() => {
@@ -13,6 +13,9 @@ import type { Bounds, Detection } from "../types";
     lastPing = 0,
     lastSent = "",
     selecting = false;
+  let cancelSelection: (() => void) | undefined;
+  let selectionGeneration = 0;
+  let shadowRoots: ShadowRoot[] = [];
   let debounce: ReturnType<typeof setTimeout> | undefined,
     pollTimer: ReturnType<typeof setInterval> | undefined;
   function send(detection: Detection) {
@@ -20,14 +23,26 @@ import type { Bounds, Detection } from "../types";
       detection.fen,
       detection.placement,
       detection.bounds,
+      detection.viewport,
+      detection.method,
       detection.orientation,
       detection.turn,
       detection.castling,
       detection.ep,
+      detection.halfmove,
+      detection.fullmove,
+      detection.ambiguous,
+      detection.confidence,
       detection.playerColor,
       detection.issues,
     ]);
-    if (key === lastSent && detection.placement) return;
+    // Pixels can change without any DOM metadata (canvas/WebGL). Those scans
+    // must still reach the screenshot worker, including on a polling heartbeat.
+    if (
+      key === lastSent &&
+      (detection.fen || detection.placement || detection.ambiguous)
+    )
+      return;
     lastSent = key;
     void chrome.runtime
       .sendMessage({ type: "CA_DETECTION", detection })
@@ -55,23 +70,39 @@ import type { Bounds, Detection } from "../types";
   }
   function schedule() {
     if (!auto || document.hidden || selecting) return;
-    clearTimeout(debounce);
-    debounce = setTimeout(() => scan(), 450);
+    // Keep the first deadline: continuous page mutations must not starve scans.
+    if (debounce !== undefined) return;
+    debounce = setTimeout(() => {
+      debounce = undefined;
+      if (auto && !document.hidden && !selecting) scan();
+    }, 450);
   }
   function stop() {
     auto = false;
     poll = false;
+    ++selectionGeneration;
+    cancelSelection?.();
+    setInputListeners(false);
     observer?.disconnect();
     observer = undefined;
     clearInterval(pollTimer);
     clearTimeout(debounce);
+    debounce = undefined;
+    lastSent = "";
+    shadowRoots = [];
+  }
+  function currentShadows() {
+    if (!target) return [];
+    return [target, ...allElements(target)]
+      .map((el) => el.shadowRoot)
+      .filter((root): root is ShadowRoot => Boolean(root));
   }
   function watch() {
     observer?.disconnect();
     observer = undefined;
     if (!auto) return;
     observer = new MutationObserver(schedule);
-    observer.observe(target || document.body, {
+    const options: MutationObserverInit = {
       subtree: true,
       childList: true,
       attributes: true,
@@ -88,16 +119,41 @@ import type { Bounds, Detection } from "../types";
         "data-orientation",
         "data-castling",
         "data-en-passant",
+        "data-halfmove",
+        "data-fullmove",
+        "data-player-color",
+        "orientation",
+        "alt",
+        "title",
         "src",
         "href",
         "aria-label",
       ],
-    });
+    };
+    observer.observe(target || document.documentElement, options);
+    shadowRoots = currentShadows();
+    for (const root of shadowRoots) observer.observe(root, options);
+    // Attribute changes on a board's host/ancestors can change its orientation
+    // or visibility. Child-list changes also catch board replacement/removal.
+    let ancestor: Node | null = target || null;
+    while (ancestor) {
+      ancestor =
+        ancestor.parentNode ||
+        (ancestor instanceof ShadowRoot ? ancestor.host : null);
+      if (ancestor)
+        observer.observe(ancestor, {
+          childList: true,
+          attributes: true,
+          attributeFilter: ["class", "style", "hidden"],
+        });
+    }
   }
   function monitor(visualPolling: boolean) {
-    auto = true;
     poll = visualPolling;
     lastPing = Date.now();
+    if (auto) return;
+    auto = true;
+    setInputListeners(true);
     watch();
     clearInterval(pollTimer);
     pollTimer = setInterval(() => {
@@ -107,7 +163,11 @@ import type { Bounds, Detection } from "../types";
       }
       if (document.hidden || selecting) return;
       if (poll) scan();
-      else if (target && !target.isConnected) {
+      else if (
+        !target ||
+        !target.isConnected ||
+        currentShadows().some((root) => !shadowRoots.includes(root))
+      ) {
         lastSent = "";
         scan();
       }
@@ -116,6 +176,9 @@ import type { Bounds, Detection } from "../types";
   function selectRegion() {
     if (selecting) return;
     selecting = true;
+    clearTimeout(debounce);
+    debounce = undefined;
+    const generation = ++selectionGeneration;
     const overlay = document.createElement("div");
     overlay.id = "chess-assist-region-selector";
     Object.assign(overlay.style, {
@@ -155,12 +218,17 @@ import type { Bounds, Detection } from "../types";
       overlay.remove();
       document.removeEventListener("keydown", escape, true);
       selecting = false;
+      cancelSelection = undefined;
     };
+    cancelSelection = cleanup;
     const escape = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
         e.preventDefault();
         e.stopPropagation();
         cleanup();
+        void chrome.runtime
+          .sendMessage({ type: "CA_SELECTION_CANCELLED" })
+          .catch(stop);
       }
     };
     document.addEventListener("keydown", escape, true);
@@ -168,6 +236,7 @@ import type { Bounds, Detection } from "../types";
       e.preventDefault();
       e.stopPropagation();
       overlay.setPointerCapture(e.pointerId);
+      region = undefined;
       start = { x: e.clientX, y: e.clientY };
     });
     overlay.addEventListener("pointermove", (e) => {
@@ -199,15 +268,15 @@ import type { Bounds, Detection } from "../types";
       if (!chosen || chosen.width < 100) return;
       manual = chosen;
       lastSent = "";
-      requestAnimationFrame(() => requestAnimationFrame(() => scan()));
+      requestAnimationFrame(() =>
+        requestAnimationFrame(() => {
+          if (generation === selectionGeneration) scan();
+        }),
+      );
     });
   }
-  // Observing genuine user input is useful for canvas/WebGL, which do not emit DOM mutations.
-  for (const event of ["pointerup", "keyup", "touchend"])
-    document.addEventListener(event, schedule, {
-      passive: true,
-      capture: true,
-    });
+  // Keep page input listeners only while a panel is monitoring this source.
+  const inputEvents = ["pointerup", "keyup", "touchend"];
   const geometryChanged = () => {
     if (manual) {
       manual = undefined;
@@ -215,17 +284,41 @@ import type { Bounds, Detection } from "../types";
     }
     schedule();
   };
-  window.addEventListener("resize", geometryChanged, { passive: true });
-  window.addEventListener("scroll", geometryChanged, {
-    passive: true,
-    capture: true,
-  });
+  const visibleAgain = () => {
+    if (!document.hidden) schedule();
+  };
+  function setInputListeners(enabled: boolean) {
+    for (const event of inputEvents) {
+      if (enabled)
+        document.addEventListener(event, schedule, {
+          passive: true,
+          capture: true,
+        });
+      else document.removeEventListener(event, schedule, true);
+    }
+    if (enabled) {
+      window.addEventListener("resize", geometryChanged, { passive: true });
+      window.addEventListener("scroll", geometryChanged, {
+        passive: true,
+        capture: true,
+      });
+      document.addEventListener("visibilitychange", visibleAgain);
+      window.addEventListener("pagehide", stop);
+    } else {
+      window.removeEventListener("resize", geometryChanged);
+      window.removeEventListener("scroll", geometryChanged, true);
+      document.removeEventListener("visibilitychange", visibleAgain);
+      window.removeEventListener("pagehide", stop);
+    }
+  }
   chrome.runtime.onMessage.addListener((message, _sender, respond) => {
+    if (!message || typeof message !== "object") return;
     if (message.type === "CA_HELLO") {
       respond({ ready: true });
       return;
     }
     if (message.type === "CA_SCAN") {
+      manual = undefined;
       lastSent = "";
       respond({ detection: scan(false) });
       return;

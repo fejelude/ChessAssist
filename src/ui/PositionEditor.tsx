@@ -63,12 +63,17 @@ export function PositionEditor({
   ) => void;
   onClose: () => void;
 }) {
+  const fields = detection?.fen?.trim().split(/\s+/);
   const [orientation, setOrientation] = useState<Orientation>(
     detection?.orientation || "w",
   );
-  const [turn, setTurn] = useState<Color>(detection?.turn || "w");
-  const [rights, setRights] = useState(detection?.castling ?? ""),
-    [ep, setEp] = useState(detection?.ep ?? "");
+  const [turn, setTurn] = useState<Color>(
+    detection?.turn || (fields?.[1] === "b" ? "b" : "w"),
+  );
+  const [rights, setRights] = useState(
+      detection?.castling ?? fields?.[2] ?? "",
+    ),
+    [ep, setEp] = useState(detection?.ep ?? fields?.[3] ?? "");
   const [brush, setBrush] = useState<PieceCode | "" | null>(null),
     [selected, setSelected] = useState<Square>();
   const [painted, setPainted] = useState<Set<Square>>(new Set());
@@ -374,7 +379,7 @@ export function PositionEditor({
             No en passant
           </button>
         </details>
-        {(!detection?.castling || !detection?.ep) && (
+        {(!rights || !ep) && (
           <p className="hint">
             Castling and en passant cannot be determined from a picture alone.
             Choose the actual rights or explicitly select None.

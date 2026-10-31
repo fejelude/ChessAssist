@@ -1,29 +1,52 @@
-# Chess Assist 1.2 — validation
+# Chess Assist 1.2.1 — repository review and validation
 
-## Successful checks
+Review date: October 31, 2026. Base commit: `18c75632ede128f974670978eb0bb55fc3f0c5ee`.
 
-- Production TypeScript and Vite/esbuild build, including checks for unused symbols.
-- **62 automated tests** covering the existing engine/rules/recognition paths and the new manual workflow.
-- Both colors can be entered in Play, independently of the selected playing color. Turns alternate legally. Click and drag interactions work in the component tests.
-- Edit allows arbitrary relocation of White and Black pieces, palette additions, erasing, Clear/Starting position, orientation changes without losing edits, and explicit special-rights choices.
-- Invalid drafts stay in Edit with feedback. Save/Play commit only a valid FEN, reset the old history, and automatically request analysis. Undo and Reset restore the expected committed state.
-- Recognition failure leaves the manual board working with the requested plain-language message. Late recognition messages cannot overwrite a manual move or saved edit.
-- The authoritative workspace reducer owns committed FEN, undo history, mode and source ownership together. Invalid FENs cannot be committed.
-- Every legal Play update reaches the engine; opponent-turn arrows remain hidden. Obsolete engine results are rejected.
-- UI paths cover castling, en passant, underpromotion and Undo through the same board, in addition to retained lower-level rule tests.
-- A separate real React-to-Stockfish integration test runs the actual packaged worker JavaScript and WASM in a Node worker/browser-API harness. It verifies White/Black responses, independent moves, Pause/Start and a freshly rebuilt edited position with the old history cleared. It is **not** a Chrome browser test.
-- Engine smoke checks execute the actual WASM: legal MultiPV output, mate-in-one detection, cancellation and rapid replacement. Recognition checks locate a rasterized board and classify its pieces with local templates.
+## Scope and confirmed problems
 
-## Actual Chromium attempt: blocked
+The review covered the background/service-worker relay, content script and lifecycle, source bridge, DOM and screenshot recognition, UCI engine manager, chess position/workspace logic, React board/editor/settings, Manifest V3 configuration, build and packaging scripts, existing tests, and bundled engine/license assets.
 
-Chrome for Testing 144.0.7559.96 was downloaded and launched with the current extension and Playwright suite. It aborted before a page opened: the host forbids the Unix sockets Chrome needs (`socket(): Operation not permitted`).
+| Problem                                                                                                                                         | Change and verification                                                                                                                                                          |
+| ----------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Reconnecting to an unchanged board suppressed its first position and could leave the UI waiting indefinitely.                                   | Reset the connection signature; reconnect regression test.                                                                                                                       |
+| Navigation/reload left old source state eligible until completion; stale heartbeat/worker errors could invalidate newer work.                   | Invalidate on navigation start, clear source history, and gate async callbacks by session/generation; bridge lifecycle tests.                                                    |
+| Board hosts with their own open shadow root had no readable descendants; observers missed in-place shadow mutations.                            | Traverse and observe open roots, discover newly attached roots, and observe ancestor replacement; DOM/content tests.                                                             |
+| The 64-child discovery strategy could escape a manually chosen region.                                                                          | Apply the region restriction to every discovery strategy; regression test.                                                                                                       |
+| Malformed FEN attributes outranked a readable board; bare SVG candidates were missed; identical overlapping pieces were silently collapsed.     | Validate FEN before scoring, use lowercase local names, and flag all collisions; DOM regressions.                                                                                |
+| Continuous mutations could postpone recognition indefinitely, while unchanged FENs generated redundant messages.                                | Use a bounded scan deadline and deduplicate readable positions. Preserve repeated screenshot requests for canvas/WebGL; content tests.                                           |
+| Stopping while selecting left an overlay/Escape listener or delayed scan alive.                                                                 | Cancel selector work and remove monitoring listeners, observers, timers and pending captures; content lifecycle tests. Escape reports cancellation to restore manual analysis.   |
+| Explicit rights and move clocks could be ignored when piece placement was unchanged.                                                            | Match all available metadata before inheriting history; starting-position shortcut applies only with no explicit special metadata. Position/bridge tests.                        |
+| A stalled visual worker could leave the UI waiting; stale screenshot bounds could sample outside the capture.                                   | Add a 12-second watchdog and bounds validation; bridge/vision tests. Vertically stacked competing boards now remain ambiguous.                                                   |
+| Closing one controller stopped another controller watching the same tab.                                                                        | Reference-count panel bindings; background test. Screenshot responses also reject a tab switch or navigation during capture.                                                     |
+| Corrupt settings could crash startup or generate invalid UCI limits.                                                                            | Recover from JSON/storage errors, validate saved options and normalize finite engine limits; UI/engine tests.                                                                    |
+| Cancelling Edit during a pending connection left the committed board invalid; FEN-only corrections lost turn/rights; calibration was discarded. | Restore manual validity on cancel, initialize metadata from full FEN, and pass saved correction templates to the source bridge. UI regressions plus bridge persistence coverage. |
+| Package filename was fixed to 1.2.0.                                                                                                            | Derive it from package.json; rebuild/version 1.2.1 and validate the archive and checksums.                                                                                       |
 
-No real-browser pass is claimed for side-panel rendering, native drag behavior, toolbar-granted activeTab permission, CSP enforcement, Chrome screenshots, or live webpage synchronization. Node/jsdom component and WASM-harness checks do not establish those claims.
+## Development dependency audit
 
-The provided browser suite covers actual extension-page engine analysis, both colors, Play moves, inline Edit, native drag/click, correction, terminal states, source mutations and renderer fixtures. It remains ready to run on a normal desktop or CI host. Also manually check the production manifest's normal toolbar gesture, origin changes, panel close/reopen, and protected-page errors.
+The initial `npm audit` found four affected development packages: Vitest, @vitest/mocker, tinypool and Sharp (including high/critical advisories). Vitest is updated to 5.0.5 and Sharp to 0.35.5 with a regenerated lockfile. Runtime dependency versions are unchanged. The final `npm audit --json` reports **zero vulnerabilities**, and all 97 tests pass under Vitest 5.0.5.
+
+## Local checks
+
+- Original baseline: **62 tests passed**, production build passed.
+- Eight added regression cases were run against the original source and failed before their fixes.
+- Updated suite: **97 tests passed** across 10 files, including the real React-to-packaged-Stockfish WASM integration test. The build, engine smoke check, vision smoke check and package/checksum verification also passed.
+- `npm run build`: TypeScript checks and production Vite/esbuild output.
+- `npm run test:engine`: real WASM MultiPV, legal root moves, mate in one, cancellation and rapid position replacement.
+- `npm run test:vision`: raster board location; 29/32 default-template piece labels with no confidently wrong identities; 32/32 piece labels and 32 empty cells with confirmed templates.
+- `npm run package`: installable dist, source and notices; ZIP integrity and SHA256SUMS verification.
+- `git diff --check`: whitespace validation.
+
+The production manifest retains `activeTab`, `scripting`, `storage`, `sidePanel`, the existing local WASM CSP, and no permanent host permissions. Stockfish binaries, neural network, artwork and third-party licenses are retained.
+
+## Browser verification limits
+
+The Playwright Chrome for Testing download returned an empty/truncated archive on this host. A separately obtained Chromium 153 headless-shell executable launched, but the extension service worker never appeared (30-second timeout); that executable does not establish a Chrome extension pass. **No full local Chrome pass is claimed.**
+
+The expanded `npm run test:browser` suite and `.github/workflows/validate.yml` are provided for full Chromium: packaged worker under MV3 CSP, legal manual moves, native drag/drop, correction, underpromotion, terminal states, content synchronization, in-place Shadow DOM changes, same-tab reload/navigation, cancelled selection, renderer fixtures, and screenshot recognition. This suite was expanded here but could not complete locally. CI results, when available, are separate evidence.
+
+The browser harness uses a temporary manifest with host access to automate controlled localhost fixtures. It does not verify production toolbar-granted `activeTab` access. A desktop smoke check is still needed for toolbar opening, granting/revoking access across origins, native side-panel close/reopen, protected pages, and file-URL opt-in. Unit/jsdom tests cannot establish these browser behaviors.
 
 ## Remaining limits
 
-The screenshot recognizer remains template-based and theme-dependent. The tested default templates identify 29 of 32 pieces at the tested scale with no confidently wrong identities; confirmed templates identify all 32 pieces and 32 empty squares. This does not guarantee arbitrary artwork recognition. Manual analysis is now independent of recognition success.
-
-Pixels alone cannot prove castling rights, en passant or arbitrary midgame turn state. Unknown special rights require an explicit editor choice. Saved edited positions start fresh move clocks and do not reconstruct repetition history.
+Recognition remains template-based and cannot guarantee arbitrary websites, artwork, perspective/3D boards, occlusion, closed shadow roots or inaccessible frames. Unknown images require correction. DOM geometry still requires an axis-aligned board that fits the viewport. Pixels do not prove arbitrary midgame turn state, castling or en passant rights. Saved edited positions reset clocks and do not reconstruct repetition history. The retained review helper is not exposed as a PGN-import UI in the current app.

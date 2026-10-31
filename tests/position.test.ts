@@ -107,3 +107,28 @@ describe("position reconstruction", () => {
     );
   });
 });
+
+it("uses updated explicit metadata when placement has not changed", () => {
+  const r = reconcile(
+    START_FEN,
+    detection(START_FEN.split(" ")[0], {
+      orientation: "w",
+      turn: "w",
+      castling: "-",
+      ep: "-",
+      halfmove: 8,
+      fullmove: 5,
+    }),
+  );
+  expect(r.fen).toBe(`${START_FEN.split(" ")[0]} w - - 8 5`);
+});
+
+it("accepts whitespace-separated FEN fields without misreading castling metadata", () => {
+  expect(validatePosition(START_FEN.replaceAll(" ", "\t"))).toBeUndefined();
+});
+it("rejects duplicate castling rights and fractional move counters", () => {
+  expect(validatePosition(START_FEN.replace("KQkq", "KK"))).toMatch(/Castling/);
+  expect(validatePosition(START_FEN.replace("0 1", "0.5 1"))).toMatch(
+    /counters/,
+  );
+});
