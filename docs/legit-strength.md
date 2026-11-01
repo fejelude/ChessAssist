@@ -115,8 +115,10 @@ human behavior and can make even the beginner tactically stronger than its label
 
 The number of candidates is bounded by the number of legal moves. Only legal,
 exact evaluations from a complete, equally deep MultiPV iteration are compared.
-An incomplete final iteration cannot replace the last complete set. If the
-worker provides no scored line, its legal bestmove remains a safe fallback.
+An incomplete final iteration cannot replace the last complete set. An exact
+mate score attached to the final bestmove takes precedence over an older set,
+including a newly discovered forced loss. If no complete iteration finished,
+the legal bestmove is shown without borrowing a partial candidate's score.
 All published training results are final and retain the selected move's own
 PV and evaluation, rather than displaying a different move with the best score.
 
@@ -155,12 +157,16 @@ candidate variation and decreasing expected loss on a controlled candidate set,
 mate handling, both colors, castling, en passant and promotion. It checks
 request isolation, incomplete MultiPV iterations, cache bypass, restoring
 Stockfish, persistence and preserving moves/history during setting changes.
-The real WASM smoke benchmark exercises all twelve selections on three
-positions and independently evaluates selected child positions. It writes
+The real WASM smoke benchmark exercises all twelve selections on six
+positions (including special rights and Black promotion), independently
+evaluates selected child positions, checks the actual UCI settings, exercises
+all three time budgets and custom endpoints, and switches configurations
+while a real search is running. Candidate sampling uses a recorded fixed seed
+in this harness only. It writes
 `test-results/engine-report.json`. Its reference-loss numbers are noisy
 diagnostics from a small sample, **not a strength estimate or human-style test**.
-The Chrome test exercises actual MV3 storage, engine integration and reopening
-an extension page, and saves a settings screenshot.
+The Chrome test observes actual worker commands for all twelve selections,
+tests MV3 storage and reopening an extension page, and saves a settings screenshot.
 
 Before claiming that these targets have measured FIDE equivalence:
 

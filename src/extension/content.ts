@@ -15,9 +15,16 @@ import type { Bounds, Detection } from "../types";
     selecting = false;
   let cancelSelection: (() => void) | undefined;
   let selectionGeneration = 0;
+  let monitoringGeneration = 0;
   let shadowRoots: ShadowRoot[] = [];
   let debounce: ReturnType<typeof setTimeout> | undefined,
     pollTimer: ReturnType<typeof setInterval> | undefined;
+  function notify(message: object) {
+    const generation = monitoringGeneration;
+    void chrome.runtime.sendMessage(message).catch(() => {
+      if (generation === monitoringGeneration) stop();
+    });
+  }
   function send(detection: Detection) {
     const key = JSON.stringify([
       detection.fen,
@@ -44,9 +51,7 @@ import type { Bounds, Detection } from "../types";
     )
       return;
     lastSent = key;
-    void chrome.runtime
-      .sendMessage({ type: "CA_DETECTION", detection })
-      .catch(stop);
+    notify({ type: "CA_DETECTION", detection });
   }
   function scan(emit = true): Detection {
     const found = detectDocument(manual);
@@ -78,6 +83,7 @@ import type { Bounds, Detection } from "../types";
     }, 450);
   }
   function stop() {
+    ++monitoringGeneration;
     auto = false;
     poll = false;
     ++selectionGeneration;
@@ -226,9 +232,7 @@ import type { Bounds, Detection } from "../types";
         e.preventDefault();
         e.stopPropagation();
         cleanup();
-        void chrome.runtime
-          .sendMessage({ type: "CA_SELECTION_CANCELLED" })
-          .catch(stop);
+        notify({ type: "CA_SELECTION_CANCELLED" });
       }
     };
     document.addEventListener("keydown", escape, true);
@@ -265,7 +269,10 @@ import type { Bounds, Detection } from "../types";
       e.stopPropagation();
       const chosen = region;
       cleanup();
-      if (!chosen || chosen.width < 100) return;
+      if (!chosen || chosen.width < 100) {
+        notify({ type: "CA_SELECTION_CANCELLED" });
+        return;
+      }
       manual = chosen;
       lastSent = "";
       requestAnimationFrame(() =>

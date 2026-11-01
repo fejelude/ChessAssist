@@ -224,6 +224,60 @@ describe("Legit request isolation", () => {
         `info depth ${depth} multipv ${i + 1} score cp ${30 - i} nodes 100 time 10 pv ${move}`,
       );
   }
+  it.each([3, -3])(
+    "keeps a final exact mate (%s) discovered after the last complete iteration",
+    async (mate) => {
+      const w = new FakeWorker(),
+        e = new Engine(() => w),
+        results: any[] = [];
+      e.onResult = (r) => results.push(r);
+      try {
+        await e.analyze(START_FEN, legit);
+        frame(w, 8);
+        w.emit(`info depth 9 multipv 1 score mate ${mate} pv h2h4`);
+        w.emit("bestmove h2h4");
+        expect(results.at(-1).lines[0]).toMatchObject({
+          mate,
+          depth: 9,
+          pv: ["h2h4"],
+        });
+      } finally {
+        e.dispose();
+      }
+    },
+  );
+  it("does not let a bounded mate override a complete exact iteration", async () => {
+    const w = new FakeWorker(),
+      e = new Engine(() => w),
+      results: any[] = [];
+    e.onResult = (r) => results.push(r);
+    try {
+      await e.analyze(START_FEN, legit);
+      frame(w, 8);
+      w.emit("info depth 9 multipv 1 score mate 3 lowerbound pv h2h4");
+      w.emit("bestmove h2h4");
+      expect(results.at(-1).lines[0].depth).toBe(8);
+      expect(results.at(-1).lines[0].mate).toBeUndefined();
+    } finally {
+      e.dispose();
+    }
+  });
+  it("does not sample partial candidates when no complete iteration finished", async () => {
+    const w = new FakeWorker(),
+      e = new Engine(() => w),
+      results: any[] = [];
+    e.onResult = (r) => results.push(r);
+    try {
+      await e.analyze(START_FEN, legit);
+      w.emit("info depth 1 multipv 1 score cp 30 pv e2e4");
+      w.emit("info depth 1 multipv 2 score cp 25 pv d2d4");
+      w.emit("bestmove g1f3");
+      expect(results.at(-1).lines[0]).toMatchObject({ depth: 0, pv: ["g1f3"] });
+      expect(results.at(-1).lines[0].cp).toBeUndefined();
+    } finally {
+      e.dispose();
+    }
+  });
   it("uses the last complete MultiPV iteration and never streams a transient perfect move", async () => {
     const w = new FakeWorker(),
       e = new Engine(() => w),

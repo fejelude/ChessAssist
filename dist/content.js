@@ -3771,8 +3771,15 @@
     let auto = false, poll = false, lastPing = 0, lastSent = "", selecting = false;
     let cancelSelection;
     let selectionGeneration = 0;
+    let monitoringGeneration = 0;
     let shadowRoots = [];
     let debounce, pollTimer;
+    function notify(message) {
+      const generation = monitoringGeneration;
+      void chrome.runtime.sendMessage(message).catch(() => {
+        if (generation === monitoringGeneration) stop();
+      });
+    }
     function send(detection) {
       const key = JSON.stringify([
         detection.fen,
@@ -3794,7 +3801,7 @@
       if (key === lastSent && (detection.fen || detection.placement || detection.ambiguous))
         return;
       lastSent = key;
-      void chrome.runtime.sendMessage({ type: "CA_DETECTION", detection }).catch(stop);
+      notify({ type: "CA_DETECTION", detection });
     }
     function scan(emit = true) {
       const found = detectDocument(manual);
@@ -3823,6 +3830,7 @@
       }, 450);
     }
     function stop() {
+      ++monitoringGeneration;
       auto = false;
       poll = false;
       ++selectionGeneration;
@@ -3960,7 +3968,7 @@
           e.preventDefault();
           e.stopPropagation();
           cleanup();
-          void chrome.runtime.sendMessage({ type: "CA_SELECTION_CANCELLED" }).catch(stop);
+          notify({ type: "CA_SELECTION_CANCELLED" });
         }
       };
       document.addEventListener("keydown", escape, true);
@@ -3997,7 +4005,10 @@
         e.stopPropagation();
         const chosen = region;
         cleanup();
-        if (!chosen || chosen.width < 100) return;
+        if (!chosen || chosen.width < 100) {
+          notify({ type: "CA_SELECTION_CANCELLED" });
+          return;
+        }
         manual = chosen;
         lastSent = "";
         requestAnimationFrame(

@@ -62,6 +62,33 @@ afterEach(() => {
   vi.doUnmock("../src/recognition/dom");
   delete (globalThis as any).__chessAssist;
 });
+it("ignores a delayed message failure from a stopped monitoring session", async () => {
+  let rejectOld: (e: Error) => void = () => {};
+  send.mockImplementationOnce(
+    () =>
+      new Promise((_resolve, reject) => {
+        rejectOld = reject;
+      }),
+  );
+  message("CA_MONITOR");
+  document.dispatchEvent(new Event("pointerup"));
+  await vi.advanceTimersByTimeAsync(500);
+  message("CA_STOP");
+  message("CA_SCAN");
+  message("CA_MONITOR");
+  rejectOld(new Error("old connection closed"));
+  await vi.advanceTimersByTimeAsync(0);
+  document.dispatchEvent(new Event("pointerup"));
+  await vi.advanceTimersByTimeAsync(500);
+  expect(send).toHaveBeenCalledTimes(2);
+});
+it("reports cancellation after a region drag that is too small", () => {
+  message("CA_SELECT");
+  const overlay = document.getElementById("chess-assist-region-selector")!;
+  overlay.dispatchEvent(new Event("pointerup"));
+  expect(overlay.isConnected).toBe(false);
+  expect(send).toHaveBeenCalledWith({ type: "CA_SELECTION_CANCELLED" });
+});
 it("monitors mutations inside a board's open shadow root", async () => {
   const shadow = root.attachShadow({ mode: "open" });
   const piece = document.createElement("span");
