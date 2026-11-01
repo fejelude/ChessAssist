@@ -1,5 +1,6 @@
 import { Chess } from "chess.js";
 import { validatePosition } from "../chess/position";
+import { selectTrainingMove, strengthProfile } from "./legit";
 import {
   defaults,
   type Candidate,
@@ -45,7 +46,12 @@ export class Engine {
   private rejectReady?: (e: Error) => void;
   private generation = 0;
   private serial = 0;
-  private active?: { request: Request; lines: Map<number, Candidate> };
+  private active?: {
+    request: Request;
+    lines: Map<number, Candidate>;
+    candidateCount: number;
+    completedLines?: Candidate[];
+  };
   private pending?: Request;
   private stopping = false;
   private startupTimer?: ReturnType<typeof setTimeout>;
@@ -174,7 +180,10 @@ export class Engine {
     const id = ++this.serial,
       request = { id, fen, settings: { ...settings }, attempt: 0 };
     this.pending = request;
-    const cached = this.cache.get(this.key(fen, settings));
+    // Training choices are sampled anew, never replayed from analysis cache.
+    const cached = strengthProfile(settings)
+      ? undefined
+      : this.cache.get(this.key(fen, settings));
     if (cached) {
       this.pending = undefined;
       if (this.active && !this.stopping) this.stop();
@@ -241,6 +250,13 @@ export class Engine {
         const { id, fen, settings } = active.request;
         let lines = [...active.lines.values()].sort((a, b) => a.rank - b.rank);
         const move = line.split(/\s+/)[1];
+        const profile = strengthProfile(settings);
+        if (profile)
+          lines = selectTrainingMove(
+            fen,
+            active.completedLines ?? lines,
+            profile,
+          );
         // Some valid UCI searches only emit bestmove; make that visible too.
         if (!lines.length && this.legal(fen, move))
           lines = [
@@ -253,7 +269,7 @@ export class Engine {
           );
           return;
         }
-        if (settings.preset !== "infinite") {
+        if (!profile && settings.preset !== "infinite") {
           this.cache.set(this.key(fen, settings), lines);
           if (this.cache.size > 32)
             this.cache.delete(this.cache.keys().next().value!);
@@ -273,6 +289,15 @@ export class Engine {
         { id, fen } = this.active.request;
       if (info && this.legal(fen, info.pv[0])) {
         this.active.lines.set(info.rank, info);
+        if (strengthProfile(this.active.request.settings)) {
+          const lines = [...this.active.lines.values()];
+          if (
+            lines.length === this.active.candidateCount &&
+            lines.every((l) => l.depth === info.depth && !l.bound)
+          )
+            this.active.completedLines = lines.sort((a, b) => a.rank - b.rank);
+          return;
+        }
         this.onResult({
           id,
           fen,
@@ -288,22 +313,27 @@ export class Engine {
     const request = this.pending;
     this.pending = undefined;
     if (!request || request.id !== this.serial || !this.worker) return;
-    this.active = { request, lines: new Map() };
     const s = request.settings;
+    const profile = strengthProfile(s);
+    const candidateCount = profile
+      ? Math.min(profile.candidates, new Chess(request.fen).moves().length)
+      : Math.max(1, Math.min(3, s.multiPV));
+    this.active = { request, lines: new Map(), candidateCount };
     this.worker.postMessage(
       `setoption name Hash value ${Math.max(8, Math.min(128, s.hash))}`,
     );
-    this.worker.postMessage(
-      `setoption name MultiPV value ${Math.max(1, Math.min(3, s.multiPV))}`,
-    );
+    this.worker.postMessage(`setoption name MultiPV value ${candidateCount}`);
+    // Prevent deeper analysis or stronger presets from supplying cached
+    // tactical knowledge to a weaker training search at this position.
+    if (profile) this.worker.postMessage("setoption name Clear Hash");
     this.worker.postMessage(`position fen ${request.fen}`);
     const ms = Math.max(100, Math.min(120000, s.time)),
-      depth = Math.max(1, Math.min(60, s.depth));
+      depth = profile?.depth ?? Math.max(1, Math.min(60, s.depth));
     this.worker.postMessage(
-      `go ${s.preset === "infinite" ? "infinite" : `depth ${depth} movetime ${ms}`}`,
+      `go ${profile ? `depth ${depth} nodes ${profile.nodes} movetime ${ms}` : s.preset === "infinite" ? "infinite" : `depth ${depth} movetime ${ms}`}`,
     );
     this.onStatus("Thinking…");
-    if (s.preset !== "infinite")
+    if (profile || s.preset !== "infinite")
       this.searchTimer = setTimeout(
         () => this.failure(new Error("The engine did not finish this search.")),
         ms + 5000,
