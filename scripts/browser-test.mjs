@@ -85,6 +85,17 @@ try {
     ],
     viewport: { width: 1100, height: 1000 },
   });
+  // Observe real worker traffic; do not replace the packaged engine or its replies.
+  await context.addInitScript(() => {
+    window.__engineCommands = [];
+    const NativeWorker = window.Worker;
+    window.Worker = class extends NativeWorker {
+      postMessage(data, ...rest) {
+        if (typeof data === "string") window.__engineCommands.push(data);
+        return super.postMessage(data, ...rest);
+      }
+    };
+  });
   const worker =
     context.serviceWorkers()[0] ||
     (await context.waitForEvent("serviceworker"));
@@ -153,7 +164,23 @@ try {
   await click("Open menu");
   const timeBefore = await app.getByLabel("Thinking time").inputValue();
   await app.getByLabel("Configuration", { exact: true }).selectOption("legit");
-  for (const preset of ["beginner", "im", "elite-gm", "custom"]) {
+  const currentFen = await app.evaluate(() =>
+    window.__engineCommands.findLast((c) => c.startsWith("position fen ")),
+  );
+  for (const [preset, depth, nodes, candidates] of [
+    ["default", 9, 30000, 8],
+    ["beginner", 3, 1500, 16],
+    ["intermediate", 5, 5000, 12],
+    ["club", 7, 15000, 10],
+    ["advanced", 9, 30000, 8],
+    ["expert", 11, 60000, 7],
+    ["cm", 12, 90000, 6],
+    ["fm", 13, 120000, 5],
+    ["im", 14, 160000, 5],
+    ["gm", 16, 240000, 4],
+    ["elite-gm", 18, 360000, 4],
+    ["custom", 14, 150000, 5],
+  ]) {
     await app
       .getByLabel("Playing Strength", { exact: true })
       .selectOption(preset);
@@ -165,7 +192,20 @@ try {
         .getByRole("spinbutton", { name: /Custom Elo target/ })
         .press("Tab");
     }
+    const command = `go depth ${depth} nodes ${nodes} movetime ${timeBefore}`;
+    await app.waitForFunction(
+      (command) => window.__engineCommands.at(-1) === command,
+      command,
+    );
     await recommendation();
+    const commands = await app.evaluate(() => window.__engineCommands);
+    assert.deepEqual(commands.slice(-5), [
+      `setoption name Hash value 32`,
+      `setoption name MultiPV value ${candidates}`,
+      "setoption name Clear Hash",
+      currentFen,
+      command,
+    ]);
   }
   assert.equal(await app.getByLabel("Thinking time").inputValue(), timeBefore);
   assert.equal(
@@ -214,8 +254,12 @@ try {
     .selectOption("stockfish");
   await click("Close menu");
   await recommendation();
+  assert.equal(
+    await app.evaluate(() => window.__engineCommands.at(-1)),
+    `go depth 24 movetime ${timeBefore}`,
+  );
   report.checks.push(
-    "Legit presets and custom target work with real WASM, preserve the current board and thinking time during switches, and persist in a newly opened Chrome extension page.",
+    "All 12 Legit selections send their distinct depth/node/MultiPV settings to real WASM, preserve the exact FEN, board and thinking time, persist in a reopened extension page, and restore Stockfish commands.",
   );
   await click("Pause");
   assert.equal(await app.locator(".move-arrow").count(), 0);
@@ -355,6 +399,28 @@ try {
   await app.getByText("Practice board", { exact: true }).waitFor();
   report.checks.push(
     "Escape cancels region selection and restores manual analysis.",
+  );
+  // Reattach and release a region without a usable drag: it must not hang.
+  await app
+    .getByRole("button", { name: "Open menu", exact: true })
+    .evaluate((button) => button.click());
+  await app
+    .getByRole("button", { name: "Reconnect to webpage", exact: true })
+    .evaluate((button) => button.click());
+  await app.locator(".move-arrow").waitFor({ timeout: 20000 });
+  await worker.evaluate(
+    async (tabId) => chrome.tabs.sendMessage(tabId, { type: "CA_SELECT" }),
+    tabId,
+  );
+  await fixture
+    .locator("#chess-assist-region-selector")
+    .click({ position: { x: 30, y: 80 } });
+  await fixture
+    .locator("#chess-assist-region-selector")
+    .waitFor({ state: "detached" });
+  await app.getByText("Practice board", { exact: true }).waitFor();
+  report.checks.push(
+    "An undersized region selection restores manual analysis without hanging.",
   );
   const detect = () =>
     worker.evaluate(

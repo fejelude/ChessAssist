@@ -1,5 +1,78 @@
 # Chess Assist 1.2.1 — repository review and validation
 
+## Final QA pass — November 1, 2026
+
+Base: `a9d0b6e707920f4b312fc8769d24a0784bc2ab90` (merged Legit configuration).
+This pass reviewed the engine and settings integration, all source/recognition
+and board/editor modules, build/package assets, and the complete test harness.
+The interface, engine binaries, preset parameters and Stockfish search path
+are preserved.
+
+### Confirmed defects fixed
+
+| Issue                                                                                                               | Root cause                                                                                                                  | Fix and regression evidence                                                                                                                                       |
+| ------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Legit could discard a newly discovered forced mate or forced loss.                                                  | Final selection always preferred an older complete MultiPV frame, even when the final bestmove now had an exact mate score. | Preserve that exact bestmove/mate/PV before sampling older alternatives. Tests cover positive/negative mates and rejection of bounded mate scores.                |
+| An early cutoff could sample an incomplete candidate set and show its score instead of the engine's final bestmove. | When no complete frame existed, selection fell back to the partially populated rank map.                                    | Sample only a complete frame; otherwise show the legal bestmove with no invented evaluation. Partial-frame regression test.                                       |
+| Webpage monitoring could stop after a successful reconnect.                                                         | A message rejection from an earlier session called the shared stop function without checking its session.                   | Gate asynchronous message failures by monitoring generation. Regression delays the old rejection until a new session is active and verifies monitoring continues. |
+| Region selection could leave the controller waiting indefinitely after a click or short drag.                       | The overlay was removed without a detection or cancellation message when the selected area was below the minimum size.      | Notify the existing cancellation path. Unit regression and a Chrome interaction scenario cover this.                                                              |
+
+The four initial regression cases failed against the unchanged base source
+before these fixes. Additional mate tests cover the fix's boundary behavior.
+
+### Verification
+
+- Baseline production build and all **113 tests** passed.
+- Updated production build and **119 tests across 11 files** passed, including
+  React connected to the real packaged WASM worker. No mocked engine is used
+  by that separate integration test.
+- Expanded `npm run test:engine` passed: **72 preset/position cases**, with
+  legal full PVs and independent child-position evaluation; **24 additional
+  cases** cover Balanced/Thorough (Quick is covered in the 72); custom targets
+  400 and 3000 also return legal moves. The harness checks actual depth, node,
+  MultiPV, Clear Hash and time commands, plus live
+  Stockfish → Beginner → Elite → Stockfish switching on a FEN containing
+  castling/en-passant rights and nonzero move counters.
+- Vision checks passed: 29/32 default labels with no confidently wrong labels;
+  confirmed templates identify all 32 pieces and 32 empty cells.
+- `npm audit --json`: **0 vulnerabilities**.
+- Package/ZIP and every SHA-256 checksum validated; bundled engine hashes,
+  production manifest and permissions remain unchanged.
+- The updated local Chrome suite was attempted but could not launch: the
+  Playwright browser download repeatedly returned a truncated archive, leaving
+  no executable. Browser scenarios are consequently **not claimed as locally
+  verified**. The PR workflow runs the full MV3 suite and uploads its reports.
+
+### Findings that are not resolved by code tests
+
+The controls reach the actual engine and profiles have different resource and
+candidate-selection parameters. This does **not** establish an empirically
+ordered FIDE strength ladder or prove adjacent bands play meaningfully
+differently against rated humans. Single-position results overlap and deeper
+reference losses can exceed a profile's shallow-search loss ceiling. Default
+Legit and Advanced intentionally share a profile. No rated-human calibration
+dataset or match experiment is present; the provisional rating text stays.
+
+Legit remains Stockfish with bounded search, evaluation-weighted sampling and
+small positional priors. It is not a learned model of human decisions. Its
+capture/check attraction and development/king-safety preferences were inspected;
+no evidence supports claiming IM/GM human equivalence. Retuning the profiles
+without calibration evidence would substitute another assumption, so this QA
+pass leaves their parameters intact. See `docs/legit-strength.md` for the
+calibration protocol.
+
+The merged interface has a **Thinking time** dropdown (Quick/Balanced/Thorough),
+not a separate “Thinking Time Balance” control. There is also no independent
+playing-style selector: style heuristics vary with strength. This pass verifies
+the implemented controls and does not add missing product features.
+
+Desktop toolbar-granted activeTab permission, cross-origin revocation, native
+side-panel close/reopen and protected/file pages still need a desktop Chrome
+check. The CI fixture manifest adds test-only host access. Arbitrary artwork,
+closed shadow roots, inaccessible frames and perspective boards retain the
+recognition limits below. FEN-only analysis does not reconstruct threefold
+repetition history. No claim of exhaustive absence of bugs is made.
+
 Review dates: October 31–November 1, 2026. Base commit: `18c75632ede128f974670978eb0bb55fc3f0c5ee`.
 
 ## Scope and confirmed problems

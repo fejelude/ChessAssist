@@ -251,12 +251,18 @@ export class Engine {
         let lines = [...active.lines.values()].sort((a, b) => a.rank - b.rank);
         const move = line.split(/\s+/)[1];
         const profile = strengthProfile(settings);
-        if (profile)
+        if (profile) {
+          // A completed older frame must not hide a mate that the final
+          // bestmove has since proved (including a newly discovered forced loss).
+          const finalMate = lines.find(
+            (l) => l.pv[0] === move && l.mate !== undefined && !l.bound,
+          );
           lines = selectTrainingMove(
             fen,
-            active.completedLines ?? lines,
+            finalMate ? [finalMate] : (active.completedLines ?? []),
             profile,
           );
+        }
         // Some valid UCI searches only emit bestmove; make that visible too.
         if (!lines.length && this.legal(fen, move))
           lines = [
