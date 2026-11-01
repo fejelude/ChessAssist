@@ -14,6 +14,14 @@ await build({
   outfile: join(temp, "engine.mjs"),
 });
 const { Engine } = await import(join(temp, "engine.mjs"));
+await build({
+  entryPoints: ["src/engine/legit.ts"],
+  bundle: true,
+  platform: "node",
+  format: "esm",
+  outfile: join(temp, "legit.mjs"),
+});
+const { strengthPresets } = await import(join(temp, "legit.mjs"));
 const bootstrap = `const {parentPort,workerData}=require('node:worker_threads');const fs=require('node:fs');const vm=require('node:vm');const path=require('node:path');
 const scope={URL,WebAssembly,TextDecoder,TextEncoder,Uint8Array,ArrayBuffer,SharedArrayBuffer,ReadableStream,Headers,Response,performance,crypto:require('node:crypto').webcrypto,console,setTimeout,clearTimeout,WorkerGlobalScope:class{},onmessage:null,name:'',location:{hash:'',origin:'https://chess-assist.local',pathname:'/engine/stockfish.js',href:'https://chess-assist.local/engine/stockfish.js'},postMessage:m=>parentPort.postMessage(m),close:()=>parentPort.close()};
 scope.self=scope;scope.fetch=async url=>{if(!String(url).endsWith('stockfish.wasm'))throw Error('Unexpected external fetch');return new Response(fs.readFileSync(workerData.wasm),{headers:{'content-type':'application/wasm'}});};
@@ -123,6 +131,86 @@ try {
   });
   report.checks.push(
     "Cancels infinite analysis, coalesces rapid position changes, and recovers after independent 1.a3.",
+  );
+  // Behavioral smoke benchmark, not a FIDE rating calibration. The reference
+  // re-evaluates the selected child position rather than trusting shallow scores.
+  const middle = new Chess();
+  for (const move of ["e4", "e5", "Nf3", "Nc6", "Bc4", "Nf6", "d3", "Bc5"])
+    middle.move(move);
+  const positions = [
+    { name: "opening", fen: new Chess().fen() },
+    { name: "middlegame", fen: middle.fen() },
+    { name: "endgame-black", fen: "8/8/4k3/4p3/4P3/4K3/8/7R b - - 0 40" },
+  ];
+  const score = (l) =>
+    l.mate === undefined ? (l.cp ?? 0) : l.mate > 0 ? 10000 : -10000;
+  report.training = {
+    ratingCalibration:
+      "NOT performed; FIDE-style labels remain provisional training targets",
+    samples: [],
+  };
+  for (const position of positions) {
+    const reference = await waitSearch(position.fen, {
+      ...settings,
+      configuration: "stockfish",
+      multiPV: 1,
+      depth: 15,
+      time: 800,
+    });
+    for (const preset of strengthPresets) {
+      const options = {
+        ...settings,
+        configuration: "legit",
+        playingStrength: preset.id,
+        customElo: 2425,
+        time: 800,
+      };
+      const result = await waitSearch(position.fen, options);
+      assert.equal(result.lines.length, 1);
+      const line = result.lines[0],
+        child = new Chess(position.fen);
+      assert.doesNotThrow(() =>
+        child.move({
+          from: line.pv[0].slice(0, 2),
+          to: line.pv[0].slice(2, 4),
+          promotion: line.pv[0][4],
+        }),
+      );
+      const childScore = child.isCheckmate()
+        ? 10000
+        : child.isGameOver()
+          ? 0
+          : -score(
+              (
+                await waitSearch(child.fen(), {
+                  ...settings,
+                  configuration: "stockfish",
+                  multiPV: 1,
+                  depth: 15,
+                  time: 800,
+                })
+              ).lines[0],
+            );
+      report.training.samples.push({
+        position: position.name,
+        preset: preset.id,
+        move: line.pv[0],
+        depth: line.depth,
+        nodes: line.nodes,
+        time: line.time,
+        referenceLossCp: Math.max(0, score(reference.lines[0]) - childScore),
+      });
+    }
+  }
+  // A discovered mate must survive the training selection layer.
+  const trainingMate = await waitSearch(c.fen(), {
+    ...settings,
+    configuration: "legit",
+    playingStrength: "elite-gm",
+  });
+  assert.equal(trainingMate.lines[0].pv[0], "h5f7");
+  report.checks.push(
+    "All 12 Legit selections return legal moves across opening, middlegame and Black endgame; selected child positions independently re-evaluated; recognized mate retained. This is a smoke benchmark, not rating certification.",
   );
   report.passed = true;
 } finally {

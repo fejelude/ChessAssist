@@ -145,6 +145,78 @@ try {
   report.checks.push(
     "White selection, independent legal deviations, repeated moves, and turn-based clearing work.",
   );
+  // Change only the configuration; the current board and undo history survive.
+  const boardBefore = await app.getByRole("grid").getAttribute("aria-label");
+  const cellsBefore = await app
+    .getByRole("gridcell")
+    .evaluateAll((cells) => cells.map((c) => c.getAttribute("aria-label")));
+  await click("Open menu");
+  const timeBefore = await app.getByLabel("Thinking time").inputValue();
+  await app.getByLabel("Configuration", { exact: true }).selectOption("legit");
+  for (const preset of ["beginner", "im", "elite-gm", "custom"]) {
+    await app
+      .getByLabel("Playing Strength", { exact: true })
+      .selectOption(preset);
+    if (preset === "custom") {
+      await app
+        .getByRole("spinbutton", { name: /Custom Elo target/ })
+        .fill("2425");
+      await app
+        .getByRole("spinbutton", { name: /Custom Elo target/ })
+        .press("Tab");
+    }
+    await recommendation();
+  }
+  assert.equal(await app.getByLabel("Thinking time").inputValue(), timeBefore);
+  assert.equal(
+    await app.getByRole("grid").getAttribute("aria-label"),
+    boardBefore,
+  );
+  assert.deepEqual(
+    await app
+      .getByRole("gridcell")
+      .evaluateAll((cells) => cells.map((c) => c.getAttribute("aria-label"))),
+    cellsBefore,
+  );
+  await app.screenshot({
+    path: join(out, "legit-settings.png"),
+    fullPage: true,
+  });
+  // Verify actual extension storage in a newly opened extension page.
+  await app.waitForFunction(
+    async () =>
+      (await chrome.storage.local.get("simpleSettings")).simpleSettings
+        ?.customElo === 2425,
+  );
+  const restored = await context.newPage();
+  await restored.goto(`chrome-extension://${id}/index.html`);
+  await restored
+    .getByRole("button", { name: "Open menu", exact: true })
+    .click();
+  await restored.getByLabel("Playing Strength", { exact: true }).waitFor();
+  assert.equal(
+    await restored.getByLabel("Configuration", { exact: true }).inputValue(),
+    "legit",
+  );
+  assert.equal(
+    await restored.getByLabel("Playing Strength", { exact: true }).inputValue(),
+    "custom",
+  );
+  assert.equal(
+    await restored
+      .getByRole("spinbutton", { name: /Custom Elo target/ })
+      .inputValue(),
+    "2425",
+  );
+  await restored.close();
+  await app
+    .getByLabel("Configuration", { exact: true })
+    .selectOption("stockfish");
+  await click("Close menu");
+  await recommendation();
+  report.checks.push(
+    "Legit presets and custom target work with real WASM, preserve the current board and thinking time during switches, and persist in a newly opened Chrome extension page.",
+  );
   await click("Pause");
   assert.equal(await app.locator(".move-arrow").count(), 0);
   await click("Start");

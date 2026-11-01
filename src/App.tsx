@@ -14,6 +14,11 @@ import { workspaceReducer, initialWorkspace } from "./chess/workspace";
 import { PositionEditor, type EditorHandle } from "./ui/PositionEditor";
 import { Engine } from "./engine/uci";
 import {
+  normalizeTrainingPreferences,
+  strengthPresets,
+  type TrainingPreferences,
+} from "./engine/legit";
+import {
   defaults,
   type Detection,
   type Template,
@@ -62,6 +67,7 @@ export default function App() {
     [retry, setRetry] = useState(0);
   const [importText, setImportText] = useState(""),
     [importError, setImportError] = useState("");
+  const [training, setTraining] = useState(normalizeTrainingPreferences(null));
   const engine = useRef<Engine>(null),
     source = useRef<SourceBridge>(null);
   const state = useRef({ fen, color, running, practice, valid, editor });
@@ -132,6 +138,7 @@ export default function App() {
   function engineSettings() {
     return {
       ...defaults,
+      ...training,
       playerColor: color,
       multiPV: 1,
       time: budget,
@@ -212,6 +219,7 @@ export default function App() {
         }
         if ([800, 1800, 5000].includes(saved?.budget)) setBudget(saved.budget);
         if (saved?.polling === true) setPolling(true);
+        setTraining(normalizeTrainingPreferences(saved));
         setLoaded(true);
       });
     const stop = () => {
@@ -267,7 +275,7 @@ export default function App() {
   }, []);
   useEffect(() => {
     if (loaded) {
-      const saved = { color, budget, polling };
+      const saved = { color, budget, polling, ...training };
       void Promise.resolve()
         .then(() => {
           if (isExtension)
@@ -276,7 +284,7 @@ export default function App() {
         })
         .catch(() => {});
     }
-  }, [loaded, color, budget, polling]);
+  }, [loaded, color, budget, polling, training]);
   useEffect(() => {
     if (!loaded || !running || !panelOpen || editor) {
       source.current?.stop();
@@ -321,7 +329,13 @@ export default function App() {
     turn,
     terminal,
     practice,
+    training,
   ]);
+  function changeTraining(next: TrainingPreferences) {
+    engine.current?.cancel();
+    setLine(undefined);
+    setTraining(next);
+  }
   function changeColor(next: Color) {
     state.current.color = next;
     setLine(undefined);
@@ -705,6 +719,83 @@ export default function App() {
                 Undo last move
               </button>
             </div>
+            <label className="setting-label">
+              Configuration
+              <select
+                aria-label="Configuration"
+                value={training.configuration}
+                onChange={(e) =>
+                  changeTraining({
+                    ...training,
+                    configuration: e.target
+                      .value as TrainingPreferences["configuration"],
+                  })
+                }
+              >
+                <option value="stockfish">Stockfish</option>
+                <option value="legit">Legit · Practice</option>
+              </select>
+            </label>
+            {training.configuration === "legit" && (
+              <div className="legit-settings">
+                <label className="setting-label">
+                  Playing Strength
+                  <select
+                    aria-label="Playing Strength"
+                    value={training.playingStrength}
+                    aria-describedby="strength-note"
+                    onChange={(e) =>
+                      changeTraining({
+                        ...training,
+                        playingStrength: e.target
+                          .value as TrainingPreferences["playingStrength"],
+                      })
+                    }
+                  >
+                    {strengthPresets.map((p) => (
+                      <option key={p.id} value={p.id}>
+                        {p.label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                {training.playingStrength === "custom" && (
+                  <label className="setting-label">
+                    Custom Elo target
+                    <input
+                      aria-label="Custom Elo target"
+                      key={training.customElo}
+                      type="number"
+                      min={400}
+                      max={3000}
+                      step={1}
+                      defaultValue={training.customElo}
+                      aria-describedby="strength-note custom-target-note"
+                      onBlur={(e) => {
+                        const next = normalizeTrainingPreferences({
+                          ...training,
+                          customElo: e.currentTarget.valueAsNumber,
+                        });
+                        e.currentTarget.value = String(next.customElo);
+                        if (next.customElo !== training.customElo)
+                          changeTraining(next);
+                      }}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") e.currentTarget.blur();
+                      }}
+                    />
+                    <small id="custom-target-note">
+                      400–3000 · Applied when you leave the field.
+                    </small>
+                  </label>
+                )}
+                <p id="strength-note" className="muted">
+                  Provisional FIDE-style training targets, not verified ratings
+                  or titles. Human-style play is approximate. You can switch
+                  levels without resetting the position.
+                </p>
+              </div>
+            )}
             <label className="setting-label">
               Thinking time
               <select

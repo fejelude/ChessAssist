@@ -43,7 +43,23 @@ export interface SearchResult {
   lines: Candidate[];
   finished: boolean;
 }
+export type StrengthPreset =
+  | "default"
+  | "elite-gm"
+  | "gm"
+  | "im"
+  | "fm"
+  | "cm"
+  | "expert"
+  | "advanced"
+  | "club"
+  | "intermediate"
+  | "beginner"
+  | "custom";
 export interface Settings {
+  configuration?: "stockfish" | "legit";
+  playingStrength?: StrengthPreset;
+  customElo?: number;
   preset: "fast" | "balanced" | "deep" | "infinite";
   depth: number;
   time: number;
@@ -56,6 +72,9 @@ export interface Settings {
   authorized: boolean;
 }
 export const defaults: Settings = {
+  configuration: "stockfish",
+  playingStrength: "default",
+  customElo: 1800,
   preset: "balanced",
   depth: 20,
   time: 3000,

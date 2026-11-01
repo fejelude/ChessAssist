@@ -11,6 +11,7 @@ import {
 } from "@testing-library/react";
 import { Chess } from "chess.js";
 import { START_FEN } from "../src/chess/position";
+import type { Settings } from "../src/types";
 const harness = { engines: [] as any[], sources: [] as any[] };
 vi.doMock("../src/extension/bridge", () => ({
   isExtension: false,
@@ -51,12 +52,14 @@ vi.doMock("../src/engine/uci", () => {
       onResult = (_r: any) => {};
       onError = (_s: string) => {};
       calls: string[] = [];
+      settings: Settings[] = [];
       resets = 0;
       constructor() {
         harness.engines.push(this);
       }
-      async analyze(fen: string) {
+      async analyze(fen: string, settings: Settings) {
         this.calls.push(fen);
+        this.settings.push(settings);
         this.respond(fen);
         return this.calls.length;
       }
@@ -518,4 +521,127 @@ it("initializes correction metadata from a complete FEN without separate hints",
   );
   click("Save and continue");
   expect(confirm).toHaveBeenCalledWith(fen, "w", []);
+});
+
+describe("Legit settings integration", () => {
+  it("retains the complete FEN while changing levels and stays paused until resumed", async () => {
+    await open();
+    const fen = "r3k2r/8/8/3pP3/8/8/8/R3K2R w KQkq d6 7 23";
+    click("Open menu");
+    fireEvent.click(screen.getByText("Load a saved position"));
+    fireEvent.change(screen.getByLabelText("Saved FEN"), {
+      target: { value: fen },
+    });
+    click("Load position");
+    await waitFor(() => expect(engine().calls.at(-1)).toBe(fen));
+    click("Pause");
+    const calls = engine().calls.length;
+    click("Open menu");
+    fireEvent.change(screen.getByLabelText("Configuration"), {
+      target: { value: "legit" },
+    });
+    fireEvent.change(screen.getByLabelText("Playing Strength"), {
+      target: { value: "gm" },
+    });
+    click("Close menu");
+    expect(screen.getByRole("button", { name: "Start" })).toBeDefined();
+    await new Promise((r) => setTimeout(r, 230));
+    expect(engine().calls.length).toBe(calls);
+    click("Start");
+    await waitFor(() => expect(engine().calls.length).toBeGreaterThan(calls));
+    expect(engine().calls.at(-1)).toBe(fen);
+    expect(engine().settings.at(-1).playingStrength).toBe("gm");
+  });
+  it("switches configurations and presets without losing moves, special rights, history or thinking time", async () => {
+    await open();
+    move("e2", "e4");
+    move("a7", "a6");
+    await waitFor(() => expect(engine().calls.at(-1)).not.toBe(START_FEN));
+    const fen = engine().calls.at(-1),
+      resets = engine().resets;
+    click("Open menu");
+    expect(screen.queryByLabelText("Playing Strength")).toBeNull();
+    fireEvent.change(screen.getByLabelText("Thinking time"), {
+      target: { value: "5000" },
+    });
+    fireEvent.change(screen.getByLabelText("Configuration"), {
+      target: { value: "legit" },
+    });
+    expect(
+      (screen.getByLabelText("Playing Strength") as HTMLSelectElement).value,
+    ).toBe("default");
+    fireEvent.change(screen.getByLabelText("Playing Strength"), {
+      target: { value: "im" },
+    });
+    await waitFor(() =>
+      expect(engine().settings.at(-1)).toMatchObject({
+        configuration: "legit",
+        playingStrength: "im",
+        time: 5000,
+      }),
+    );
+    expect(engine().calls.at(-1)).toBe(fen);
+    fireEvent.change(screen.getByLabelText("Configuration"), {
+      target: { value: "stockfish" },
+    });
+    await waitFor(() =>
+      expect(engine().settings.at(-1).configuration).toBe("stockfish"),
+    );
+    expect(engine().calls.at(-1)).toBe(fen);
+    expect(engine().resets).toBe(resets);
+    click("Close menu");
+    click("Undo");
+    expect(
+      screen.getByRole("gridcell", { name: "a7 black pawn" }),
+    ).toBeDefined();
+    expect(
+      screen.getByRole("gridcell", { name: "e4 white pawn" }),
+    ).toBeDefined();
+  });
+  it("persists and restores custom strength and thinking time across sessions", async () => {
+    await open();
+    click("Open menu");
+    fireEvent.change(screen.getByLabelText("Configuration"), {
+      target: { value: "legit" },
+    });
+    fireEvent.change(screen.getByLabelText("Playing Strength"), {
+      target: { value: "custom" },
+    });
+    const input = screen.getByLabelText("Custom Elo target", { exact: false });
+    fireEvent.change(input, { target: { value: "2425" } });
+    fireEvent.blur(input);
+    fireEvent.change(screen.getByLabelText("Thinking time"), {
+      target: { value: "800" },
+    });
+    await waitFor(() =>
+      expect(JSON.parse(localStorage.getItem("simpleSettings")!)).toMatchObject(
+        {
+          configuration: "legit",
+          playingStrength: "custom",
+          customElo: 2425,
+          budget: 800,
+        },
+      ),
+    );
+    cleanup();
+    await open();
+    click("Open menu");
+    expect(
+      (screen.getByLabelText("Playing Strength") as HTMLSelectElement).value,
+    ).toBe("custom");
+    expect(
+      (
+        screen.getByLabelText("Custom Elo target", {
+          exact: false,
+        }) as HTMLInputElement
+      ).value,
+    ).toBe("2425");
+    expect(
+      (screen.getByLabelText("Thinking time") as HTMLSelectElement).value,
+    ).toBe("800");
+    expect(engine().settings[0]).toMatchObject({
+      configuration: "legit",
+      customElo: 2425,
+    });
+  });
 });

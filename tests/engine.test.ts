@@ -8,6 +8,7 @@ import {
 } from "../src/engine/uci";
 import { defaults } from "../src/types";
 import { START_FEN, playUci } from "../src/chess/position";
+import { strengthProfile } from "../src/engine/legit";
 class FakeWorker implements EngineWorker {
   commands: string[] = [];
   onmessage: ((e: MessageEvent) => void) | null = null;
@@ -209,4 +210,75 @@ it("uses finite integer limits when settings contain non-finite values", async (
   } finally {
     engine.dispose();
   }
+});
+
+describe("Legit request isolation", () => {
+  const legit = {
+    ...defaults,
+    configuration: "legit" as const,
+    playingStrength: "elite-gm" as const,
+  };
+  function frame(w: FakeWorker, depth: number) {
+    for (const [i, move] of ["e2e4", "d2d4", "g1f3", "c2c4"].entries())
+      w.emit(
+        `info depth ${depth} multipv ${i + 1} score cp ${30 - i} nodes 100 time 10 pv ${move}`,
+      );
+  }
+  it("uses the last complete MultiPV iteration and never streams a transient perfect move", async () => {
+    const w = new FakeWorker(),
+      e = new Engine(() => w),
+      results: any[] = [];
+    e.onResult = (r) => results.push(r);
+    try {
+      await e.analyze(START_FEN, legit);
+      frame(w, 8);
+      // A new iteration was cut off before its other candidates completed.
+      w.emit("info depth 9 multipv 1 score cp 999 nodes 101 time 11 pv a2a3");
+      expect(results).toHaveLength(0);
+      w.emit("bestmove a2a3");
+      expect(results).toHaveLength(1);
+      expect(results[0].lines[0].depth).toBe(8);
+      expect(results[0].lines[0].pv[0]).not.toBe("a2a3");
+      expect(results[0].finished).toBe(true);
+    } finally {
+      e.dispose();
+    }
+  });
+  it("coalesces same-position preset changes, discards old results, bypasses training cache and restores Stockfish options", async () => {
+    const w = new FakeWorker(),
+      e = new Engine(() => w),
+      results: any[] = [];
+    e.onResult = (r) => results.push(r);
+    try {
+      await e.analyze(START_FEN, defaults);
+      await e.analyze(START_FEN, { ...legit, playingStrength: "beginner" });
+      const latest = await e.analyze(START_FEN, legit);
+      w.emit(info);
+      w.emit("bestmove e2e4");
+      expect(results).toHaveLength(0);
+      const p = strengthProfile(legit)!;
+      expect(w.commands.at(-1)).toBe(
+        `go depth ${p.depth} nodes ${p.nodes} movetime ${defaults.time}`,
+      );
+      frame(w, 8);
+      w.emit("bestmove e2e4");
+      expect(results.at(-1).id).toBe(latest);
+      const searches = w.commands.filter((c) => c.startsWith("go ")).length;
+      await e.analyze(START_FEN, legit);
+      expect(w.commands.filter((c) => c.startsWith("go "))).toHaveLength(
+        searches + 1,
+      );
+      frame(w, 8);
+      w.emit("bestmove e2e4");
+      await e.analyze(START_FEN, defaults);
+      expect(w.commands.slice(-4)).toEqual([
+        `setoption name Hash value ${defaults.hash}`,
+        `setoption name MultiPV value ${defaults.multiPV}`,
+        `position fen ${START_FEN}`,
+        `go depth ${defaults.depth} movetime ${defaults.time}`,
+      ]);
+    } finally {
+      e.dispose();
+    }
+  });
 });
